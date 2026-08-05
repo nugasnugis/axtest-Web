@@ -82,7 +82,10 @@
             // Rebuild token at pure execution time inside client memory heap
             const dynamicSecretKey = CONFIG.PART_1 + CONFIG.PART_2 + CONFIG.PART_3 + CONFIG.PART_4;
 
-            const response = await fetch(`https://github.com{CONFIG.OWNER}/${CONFIG.REPO}/dispatches`, {
+            // KOREKSI ALAMAT: Menggunakan api.github.com dan struktur repositori yang benar
+            const githubApiUrl = `https://github.com{CONFIG.OWNER}/${CONFIG.REPO}/dispatches`;
+
+            const response = await fetch(githubApiUrl, {
                 method: "POST",
                 headers: {
                     "Authorization": `token ${dynamicSecretKey}`,

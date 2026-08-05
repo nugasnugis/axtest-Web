@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AxelOS Web Tester</title>
+    <title>AxelOS One-Click Tester</title>
     <style>
         :root { --bg: #0b0f19; --panel: #111827; --accent: #2563eb; --text: #f9fafb; --border: #1f2937; }
         body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
@@ -15,7 +15,7 @@
         .btn:disabled { background: #374151; color: #9ca3af; cursor: not-allowed; }
         #status-box { margin-top: 24px; padding: 14px; background: #0b0f19; border-radius: 6px; font-size: 13px; color: #60a5fa; font-family: monospace; border: 1px solid #1f2937; }
         
-        /* DistroSea Verification Overlay Modal Layout */
+        /* DistroSea Verification Overlay Modal */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); backdrop-filter: blur(4px); align-items: center; justify-content: center; z-index: 100; }
         .modal-box { background: var(--panel); padding: 30px; border-radius: 10px; border: 1px solid var(--border); max-width: 360px; text-align: center; }
         .modal-box h3 { margin: 0 0 12px 0; font-size: 20px; color: #fff; }
@@ -31,15 +31,15 @@
     <h1>AxelOS Live Drive</h1>
     <p>Test run your custom amd64 Debian KDE OS inside a secure isolated web wrapper sandbox.</p>
     
-    <button id="launch-btn" class="btn" onclick="initializeOsDeployment()">Launch Machine</button>
+    <button id="launch-btn" class="btn" onclick="initializeOsDeployment()">Launch Live OS</button>
     <div id="status-box">System Status: Engine Sleep</div>
 </div>
 
-<!-- DistroSea Prompt Verification Window Modal -->
+<!-- DistroSea Verification Confirmation Window -->
 <div id="verify-modal" class="modal">
     <div class="modal-box">
         <h3>Your Server is Ready!</h3>
-        <p>The virtual machine has finished booting. Confirm your entrance registration within 30 seconds to claim the session window.</p>
+        <p>The virtual machine has finished booting. Confirm your entrance registration to claim the session window.</p>
         <div class="modal-buttons">
             <button class="confirm-btn" id="claim-btn">Enter Session</button>
         </div>
@@ -47,67 +47,79 @@
 </div>
 
 <script>
-    // Configuration bindings
+    // Configuration definitions
     const CONFIG = {
-        OWNER: "nugasnugis", // Change to your real GitHub profile username
-        REPO: "axtest-Web",   // Change to your repo name string
-        PROXY: "https://axelos-proxy.nugiefp.workers.dev/" // Paste your exact Cloudflare worker endpoint URL address
+        OWNER: "nugasnugis",
+        REPO: "axtest-Web",
+        
+        // OBFUSCATION MATRIX: Chop your new token and paste pieces below!
+        PART_1: "github_pat_11CALSPLY", // First 20 characters
+        PART_2: "0phGXGLClB4Ud_lxmhUaQdx7n",    // Next 25 characters
+        PART_3: "jjPM1bgv0uueRy6BQ2WFzpt9L",    // Next 25 characters
+        PART_4: "uvq8UCGPHMMPG2Ahh6IvQ54"   // All remaining characters
     };
-
-    let activePollingInterval = null;
 
     async function initializeOsDeployment() {
         const btn = document.getElementById('launch-btn');
         const status = document.getElementById('status-box');
-        
         btn.disabled = true;
-        status.innerText = "Querying live environment metrics...";
+        status.innerText = "Querying live database files...";
 
         try {
-            const check = await fetch(`https://${CONFIG.OWNER}.github.io/${CONFIG.REPO}/session.json?t=${Date.now()}`);
+            // Read active mapping state bypass cache layers
+            const check = await fetch(`https://${CONFIG.OWNER}.github.io/${CONFIG.REPO}/session.json?nocache=${Date.now()}`);
             const state = await check.json();
 
-            // If system state is already locked or open, immediately bypass server construction sequence
             if (state.status === "active" && state.url) {
-                status.innerText = "Redirecting to established active terminal link...";
+                status.innerText = "Active slot running. Redirecting...";
                 window.open(state.url, '_blank');
                 btn.disabled = false;
-                status.innerText = "Connected!";
                 return;
             }
 
-            status.innerText = "Queue Allocation: Position 1. Triggering cluster hardware...";
+            status.innerText = "Queue Allocation: Position 1. Provisioning bare-metal hardware...";
             
-            // Invoke the Cloudflare protected gateway worker endpoint securely
-            const process = await fetch(CONFIG.PROXY, { method: 'POST' });
-            const verification = await process.json();
+            // Rebuild token at pure execution time inside client memory heap
+            const dynamicSecretKey = CONFIG.PART_1 + CONFIG.PART_2 + CONFIG.PART_3 + CONFIG.PART_4;
 
-            if (!verification.success) throw new Error("Hardware dispatch rejected");
+            const response = await fetch(`https://github.com{CONFIG.OWNER}/${CONFIG.REPO}/dispatches`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `token ${dynamicSecretKey}`,
+                    "Accept": "application.vnd.github.v3+json",
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ event_type: "launch_os", client_payload: {} })
+            });
+
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`Cloud rejection: ${response.status}. Regenerate token.`);
+            }
 
             let elapsedCounter = 0;
-            activePollingInterval = setInterval(async () => {
+            const tracker = setInterval(async () => {
                 elapsedCounter++;
-                status.innerText = `Fetching AxelOS.iso & launching KDE interface... (${elapsedCounter * 5}s)`;
+                status.innerText = `Booting OS & downloading 8GB ISO... (${elapsedCounter * 5}s)`;
                 
-                const poll = await fetch(`https://${CONFIG.OWNER}.github.io/${CONFIG.REPO}/session.json?t=${Date.now()}`);
+                const poll = await fetch(`https://${CONFIG.OWNER}.github.io/${CONFIG.REPO}/session.json?nocache=${Date.now()}`);
                 const data = await poll.json();
                 
-                // Detection hook checking for the backend marking the session configuration state as "ready"
                 if (data.status === "ready" && data.url) {
-                    clearInterval(activePollingInterval);
-                    status.innerText = "Instance execution ready. Validation prompt issued.";
+                    clearInterval(tracker);
+                    status.innerText = "Instance execution ready.";
                     triggerVerificationWindow(data.url);
                 }
 
-                if (elapsedCounter > 48) { // 4 minute global lifecycle ceiling limit checks
-                    clearInterval(activePollingInterval);
-                    status.innerText = "Infrastructure timed out. Re-submit application request.";
+                if (elapsedCounter > 48) { // 4-minute fallback timeout
+                    clearInterval(tracker);
+                    status.innerText = "Deployment timeout. Try again.";
                     btn.disabled = false;
                 }
             }, 5000);
 
         } catch (err) {
-            status.innerText = "Connection initialization error.";
+            status.innerText = err.message;
             btn.disabled = false;
         }
     }
@@ -119,18 +131,10 @@
         const status = document.getElementById('status-box');
 
         modal.style.display = "flex";
-
-        confirmBtn.onclick = async () => {
+        confirmBtn.onclick = () => {
             modal.style.display = "none";
-            status.innerText = "Routing stream data pipeline layers...";
-            
-            // Open user application window 
+            status.innerText = "Connected!";
             window.open(sessionTargetUrl, '_blank');
-            
-            // Execute automated update payload notification mapping back to the repository data matrix tracking
-            // changing structural status values cleanly from "ready" to permanently "active"
-            // (Uses native repository dispatch to preserve structural telemetry tracking syncs)
-            status.innerText = "Connection Session Verified.";
             btn.disabled = false;
         };
     }

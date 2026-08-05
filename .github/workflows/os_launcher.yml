@@ -1,0 +1,84 @@
+name: Native Cloud OS Live Boot
+on:
+  repository_dispatch:
+    types: [launch_os]
+
+permissions:
+  contents: write
+
+jobs:
+  run-vm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Virtualization and Display Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 novnc websockify curl jq
+
+      - name: Download AxelOS to Local Machine Workspace
+        run: |
+          # Pulls your exact 8GB+ ISO directly into the cloud server pipeline
+          curl -L -o custom-os.iso "https://archive.org/download/axelos-amd64/axelos-amd64.iso"
+
+      - name: Boot Debian KDE with KVM Acceleration
+        run: |
+          # Provisioned with 5GB RAM, 2 dedicated CPU cores, and host pass-through for KDE Plasma optimization
+          qemu-system-x86_64 \
+            -enable-kvm \
+            -m 5120 \
+            -smp 2 \
+            -cpu host \
+            -boot d \
+            -cdrom custom-os.iso \
+            -vnc :0 \
+            -daemonize
+
+      - name: Customize and Start noVNC Web Interface
+        run: |
+          # Rebranding the VNC page title layout natively
+          sed -i 's/noVNC/AxelOS Live Tester/g' /usr/share/novnc/vnc.html
+          echo "body { background: #0f172a !important; }" >> /usr/share/novnc/app/styles/base.css
+          
+          # Initialize the display stream protocol
+          websockify --web /usr/share/novnc/ 8080 localhost:5900 &
+
+      - name: Start Pinggy & Export Dynamic URL
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Fire live background tunnel
+          ssh -p 443 -R 80:localhost:8080 -o StrictHostKeyChecking=no a.pinggy.io > pinggy.log &
+          sleep 10
+          
+          # Extract the link
+          LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+\.pinggy\.link" pinggy.log | head -n 1)
+          
+          if [ -z "$LIVE_URL" ]; then
+            echo "Pinggy failed to spawn network connection path."
+            exit 1
+          fi
+          
+          # DistroSea configuration values: status becomes "ready" indicating validation step required
+          echo "{\"status\": \"ready\", \"url\": \"$LIVE_URL?autoconnect=true&resize=scale\"}" > session.json
+          
+          git config --global user.name "AxelOS-Launcher-Bot"
+          git config --global user.email "actions@github.com"
+          git add session.json
+          git commit -m "System ready for verification check [skip ci]" || true
+          git push
+
+      - name: Session Active Watcher
+        run: |
+          # Keep the instance listening for 2 full execution hours
+          sleep 7200
+          
+          # Wipe state file parameters clean upon graceful shutdown exit
+          echo "{\"status\": \"offline\", \"url\": \"\"}" > session.json
+          git config --global user.name "AxelOS-Launcher-Bot"
+          git config --global user.email "actions@github.com"
+          git add session.json
+          git commit -m "Session destroyed [skip ci]" || true
+          git push

@@ -39,13 +39,14 @@ jobs:
 
       - name: Customize and Start noVNC Web Interface
         run: |
-          # Secure the web canvas branding strings
-          sed -i 's/noVNC/AxelOS Live Sandbox/g' /usr/share/novnc/vnc.html
-          echo "body { background: #0b0f19 !important; }" >> /usr/share/novnc/app/styles/base.css
+          # Added sudo to bypass the temporary file write permission denied crash
+          sudo sed -i 's/noVNC/AxelOS Live Sandbox/g' /usr/share/novnc/vnc.html
+          echo "body { background: #0b0f19 !important; }" | sudo tee -a /usr/share/novnc/app/styles/base.css > /dev/null
           
           # Force websockify to run explicitly detached using system nohup redirection
           nohup websockify --web /usr/share/novnc/ 8080 localhost:5900 > websockify.log 2>&1 &
           sleep 3
+
 
 
       - name: Start Pinggy & Export Dynamic URL

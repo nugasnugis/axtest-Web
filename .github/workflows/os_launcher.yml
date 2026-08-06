@@ -47,30 +47,31 @@ jobs:
           nohup websockify --web /usr/share/novnc/ 8080 localhost:5900 > websockify.log 2>&1 &
           sleep 3
 
-
-
       - name: Start Localhost.run Tunnel & Export Dynamic URL
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Launch localhost.run tunnel in the background and pipe output to parse the url
-          ssh -R 80:localhost:8080 -o StrictHostKeyChecking=no nokey@localhost.run > tunnel.log 2>&1 &
+          # Added StrictHostKeyChecking=no and forced pseudo-terminal allocation with -tt
+          ssh -tt -R 80:localhost:8080 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null nokey@localhost.run > tunnel.log 2>&1 &
           sleep 15
           
-          # Isolate the allocated secure live link path out of the output file
-          LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+\.lhrtunnel\.link" tunnel.log | head -n 1)
+          # Upgraded regex parser loop to catch any variations of the assigned tunnel link address string
+          LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+" tunnel.log | grep -E "(lhrtunnel|lhr.life|localhost)" | head -n 1)
           
           if [ -z "$LIVE_URL" ]; then
             echo "----------------------------------------"
             echo "CRITICAL: Tunnel generation timed out."
-            echo "Dumping log contents for structural debugging:"
+            echo "Dumping raw terminal logs for verification analytics:"
             cat tunnel.log
             echo "----------------------------------------"
             exit 1
           fi
           
+          # Clean up text strings if trailing spaces or invisible line breaks slip into variables
+          CLEAN_URL=$(echo "$LIVE_URL" | tr -d '[:space:]')
+          
           # Instantly update state parameters database to ready for the frontend trigger loop
-          echo "{\"status\": \"ready\", \"url\": \"$LIVE_URL?autoconnect=true&resize=scale\"}" > session.json
+          echo "{\"status\": \"ready\", \"url\": \"${CLEAN_URL}?autoconnect=true&resize=scale\"}" > session.json
           
           git config --global user.name "AxelOS-Launcher-Bot"
           git config --global user.email "actions@github.com"

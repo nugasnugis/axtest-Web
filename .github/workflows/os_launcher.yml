@@ -49,23 +49,27 @@ jobs:
 
 
 
-      - name: Start Pinggy & Export Dynamic URL
+      - name: Start Localhost.run Tunnel & Export Dynamic URL
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Fire live background tunnel
-          ssh -p 443 -R 80:localhost:8080 -o StrictHostKeyChecking=no a.pinggy.io > pinggy.log &
-          sleep 10
+          # Launch localhost.run tunnel in the background and pipe output to parse the url
+          ssh -R 80:localhost:8080 -o StrictHostKeyChecking=no nokey@localhost.run > tunnel.log 2>&1 &
+          sleep 15
           
-          # Extract the link
-          LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+\.pinggy\.link" pinggy.log | head -n 1)
+          # Isolate the allocated secure live link path out of the output file
+          LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+\.lhrtunnel\.link" tunnel.log | head -n 1)
           
           if [ -z "$LIVE_URL" ]; then
-            echo "Pinggy failed to spawn network connection path."
+            echo "----------------------------------------"
+            echo "CRITICAL: Tunnel generation timed out."
+            echo "Dumping log contents for structural debugging:"
+            cat tunnel.log
+            echo "----------------------------------------"
             exit 1
           fi
           
-          # DistroSea configuration values: status becomes "ready" indicating validation step required
+          # Instantly update state parameters database to ready for the frontend trigger loop
           echo "{\"status\": \"ready\", \"url\": \"$LIVE_URL?autoconnect=true&resize=scale\"}" > session.json
           
           git config --global user.name "AxelOS-Launcher-Bot"
@@ -73,6 +77,7 @@ jobs:
           git add session.json
           git commit -m "System ready for verification check [skip ci]" || true
           git push
+
 
       - name: Session Active Watcher
         run: |

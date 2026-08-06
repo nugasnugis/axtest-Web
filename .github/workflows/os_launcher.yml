@@ -23,14 +23,12 @@ jobs:
           # Pulls your exact 8GB+ ISO directly into the cloud server pipeline
           curl -L -o custom-os.iso "https://archive.org/download/axelos-amd64/axelos-amd64.iso"
 
-      - name: Boot Debian KDE with KVM Acceleration
+      - name: Boot Debian KDE with Software Emulation
         run: |
-          # Provisioned with 5GB RAM, 2 dedicated CPU cores, and host pass-through for KDE Plasma optimization
+          # Removed -enable-kvm and -cpu host to bypass GitHub's hardware module block restrictions
           qemu-system-x86_64 \
-            -enable-kvm \
             -m 5120 \
             -smp 2 \
-            -cpu host \
             -boot d \
             -cdrom custom-os.iso \
             -vnc :0 \

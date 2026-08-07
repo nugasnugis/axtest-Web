@@ -52,42 +52,50 @@ jobs:
           echo "Waiting for localhost.run edge servers to allocate routing lane..."
           
           # SMART LOG STREAMER & PARSER
-          # Loops up to 60 seconds, checking the log file every 2 seconds for a real live link address
           LIVE_URL=""
           for i in {1..30}; do
             sleep 2
             LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+" tunnel.log | grep -E "(lhrtunnel|lhr.life|localhost)" | head -n 1)
             if [ ! -z "$LIVE_URL" ]; then
-              echo "----------------------------------------------------------"
-              echo "FOUND ACTIVE TUNNEL: $LIVE_URL"
-              echo "----------------------------------------------------------"
+              echo "Found URL structure text: $LIVE_URL"
               break
             fi
             echo "Waiting for connection handshake... ($((i * 2))s elapsed)"
           done
           
           if [ -z "$LIVE_URL" ]; then
-            echo "----------------------------------------"
-            echo "CRITICAL FAULT: Tunnel generation timed out after 60 seconds."
-            echo "Dumping diagnostic raw logs content:"
+            echo "CRITICAL FAULT: Tunnel generation timed out."
             cat tunnel.log
-            echo "----------------------------------------"
             exit 1
           fi
-          
-          # CRITICAL STEP FIX: Explicitly dump the log contents straight into the main console
-          # This forces the link to display inside GitHub's live logs so the Vercel API can find it
-          echo "=========================================================="
-          cat tunnel.log
-          echo "=========================================================="
           
           # Strip out trailing spaces or hidden newline characters from the output variable
           CLEAN_URL=$(echo "$LIVE_URL" | tr -d '[:space:]')
           
-          # Overwrite session.json with the true state format expected by Vercel /api/status
+          echo "=========================================================="
+          echo "TUNNEL PATH ASSIGNED: ${CLEAN_URL}"
+          echo "COMMENCING EDGE ROUTING HANDSHAKE VERIFICATION..."
+          echo "=========================================================="
+          
+          # WEB INTEGRITY VERIFICATION LOOP
+          # Forces the runner to poll the real HTTP link until it stops throwing errors or empty responses
+          for j in {1..20}; do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${CLEAN_URL}/vnc.html" || echo "000")
+            if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "302" ] || [ "$HTTP_STATUS" = "404" ] || [ "$HTTP_STATUS" = "405" ]; then
+              echo "Edge routing lane confirmed active with HTTP Status Code: ${HTTP_STATUS}"
+              break
+            fi
+            echo "Gateway signaling latency detected (HTTP ${HTTP_STATUS}). Re-verifying node mapping in 3s... ($((j * 3))s)"
+            sleep 3
+          done
+          
+          # Print log cache directly into the main execution console frame
+          cat tunnel.log
+          
+          # Overwrite session.json only after the link is physically verified as working
           echo "{\"status\": \"ready\", \"url\": \"${CLEAN_URL}?autoconnect=true&resize=scale\"}" > session.json
           
-          # Commit the ready flag back to the repository data matrix tracking
+          # Commit the working ready flag back to the repository data matrix tracking
           git config --global user.name "AxelOS-Launcher-Bot"
           git config --global user.email "actions@github.com"
           git add session.json

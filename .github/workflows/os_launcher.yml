@@ -51,18 +51,18 @@ jobs:
           
           echo "Waiting for localhost.run edge servers to allocate routing lane..."
           
-          # SMART POLLING TUNNEL CHECKER (Replaces old 'sleep 15' completely)
+          # SMART POLLING TUNNEL CHECKER
           # Loops up to 60 seconds, checking the log file every 2 seconds for a real live link address
           LIVE_URL=""
           for i in {1..30}; do
             sleep 2
             LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+" tunnel.log | grep -E "(lhrtunnel|lhr.life|localhost)" | head -n 1)
             if [ ! -z "$LIVE_URL" ]; then
-              echo "Success! Allocated live server rute mapping: $LIVE_URL"
+              echo "Success! Allocated live server route mapping: $LIVE_URL"
               break
             fi
             echo "Waiting... ($((i * 2))s elapsed)"
-          </CreativeWritingPad>
+          done
           
           if [ -z "$LIVE_URL" ]; then
             echo "----------------------------------------"

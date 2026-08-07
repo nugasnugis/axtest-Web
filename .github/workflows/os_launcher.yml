@@ -46,22 +46,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Allocate a true pseudoterminal via -tt to force localhost.run into script stream mode
+          # Allocate an unbuffered stream channel by using a background terminal pipe process
           ssh -tt -R 80:localhost:8080 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null nokey@localhost.run > tunnel.log 2>&1 &
           
           echo "Waiting for localhost.run edge servers to allocate routing lane..."
           
-          # SMART POLLING TUNNEL CHECKER
+          # SMART LOG STREAMER & PARSER
           # Loops up to 60 seconds, checking the log file every 2 seconds for a real live link address
           LIVE_URL=""
           for i in {1..30}; do
             sleep 2
             LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+" tunnel.log | grep -E "(lhrtunnel|lhr.life|localhost)" | head -n 1)
             if [ ! -z "$LIVE_URL" ]; then
-              echo "Success! Allocated live server route mapping: $LIVE_URL"
+              echo "----------------------------------------------------------"
+              echo "FOUND ACTIVE TUNNEL: $LIVE_URL"
+              echo "----------------------------------------------------------"
               break
             fi
-            echo "Waiting... ($((i * 2))s elapsed)"
+            echo "Waiting for connection handshake... ($((i * 2))s elapsed)"
           done
           
           if [ -z "$LIVE_URL" ]; then
@@ -72,6 +74,12 @@ jobs:
             echo "----------------------------------------"
             exit 1
           fi
+          
+          # CRITICAL STEP FIX: Explicitly dump the log contents straight into the main console
+          # This forces the link to display inside GitHub's live logs so the Vercel API can find it
+          echo "=========================================================="
+          cat tunnel.log
+          echo "=========================================================="
           
           # Strip out trailing spaces or hidden newline characters from the output variable
           CLEAN_URL=$(echo "$LIVE_URL" | tr -d '[:space:]')

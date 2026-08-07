@@ -12,11 +12,12 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
+        
       - name: Install Virtualization, Display, and Tracking Tools
         run: |
+          # Replaced netstat-pn with the correct package bundle identifier net-tools
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 novnc websockify curl jq xdotool netstat-pn
+          sudo apt-get install -y qemu-system-x86 novnc websockify curl jq xdotool net-tools
 
       - name: Download AxelOS ISO to Cloud Disk
         run: |

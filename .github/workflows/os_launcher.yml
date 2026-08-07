@@ -46,26 +46,46 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Allocate a true pseudoterminal via -tt to force localhost.run into script stream mode
           ssh -tt -R 80:localhost:8080 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null nokey@localhost.run > tunnel.log 2>&1 &
-          sleep 15
           
-          LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+" tunnel.log | grep -E "(lhrtunnel|lhr.life|localhost)" | head -n 1)
+          echo "Waiting for localhost.run edge servers to allocate routing lane..."
+          
+          # SMART POLLING TUNNEL CHECKER (Replaces old 'sleep 15' completely)
+          # Loops up to 60 seconds, checking the log file every 2 seconds for a real live link address
+          LIVE_URL=""
+          for i in {1..30}; do
+            sleep 2
+            LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+" tunnel.log | grep -E "(lhrtunnel|lhr.life|localhost)" | head -n 1)
+            if [ ! -z "$LIVE_URL" ]; then
+              echo "Success! Allocated live server rute mapping: $LIVE_URL"
+              break
+            fi
+            echo "Waiting... ($((i * 2))s elapsed)"
+          </CreativeWritingPad>
           
           if [ -z "$LIVE_URL" ]; then
-            echo "Tunnel failure."
+            echo "----------------------------------------"
+            echo "CRITICAL FAULT: Tunnel generation timed out after 60 seconds."
+            echo "Dumping diagnostic raw logs content:"
+            cat tunnel.log
+            echo "----------------------------------------"
             exit 1
           fi
           
+          # Strip out trailing spaces or hidden newline characters from the output variable
           CLEAN_URL=$(echo "$LIVE_URL" | tr -d '[:space:]')
           
-          # Mark state as ready for validation
+          # Overwrite session.json with the true state format expected by Vercel /api/status
           echo "{\"status\": \"ready\", \"url\": \"${CLEAN_URL}?autoconnect=true&resize=scale\"}" > session.json
           
+          # Commit the ready flag back to the repository data matrix tracking
           git config --global user.name "AxelOS-Launcher-Bot"
           git config --global user.email "actions@github.com"
           git add session.json
           git commit -m "System ready for verification check [skip ci]" || true
           git push
+
 
       - name: Live Activity Monitor & Auto-Shutdown Daemon
         env:

@@ -51,20 +51,25 @@ jobs:
           
           echo "Waiting for localhost.run edge servers to allocate routing lane..."
           
-          # SMART LOG STREAMER & PARSER
+          # ULTRA-PRECISE LOG STREAMER & PARSER
+          # Loops up to 60 seconds, checking the log file every 2 seconds for a unique live link address
           LIVE_URL=""
           for i in {1..30}; do
             sleep 2
-            LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+" tunnel.log | grep -E "(lhrtunnel|lhr.life|localhost)" | head -n 1)
+            
+            # FIXED FILTER: Explicitly blocks 'admin' and ensures it searches strictly for lines containing 'lhr.life' or dynamic tunnel links
+            LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+" tunnel.log | grep -E "(\.lhr\.life|\.lhrtunnel\.link)" | grep -v "admin" | head -n 1)
+            
             if [ ! -z "$LIVE_URL" ]; then
-              echo "Found URL structure text: $LIVE_URL"
+              echo "Real public tunnel path located successfully: $LIVE_URL"
               break
             fi
             echo "Waiting for connection handshake... ($((i * 2))s elapsed)"
           done
           
           if [ -z "$LIVE_URL" ]; then
-            echo "CRITICAL FAULT: Tunnel generation timed out."
+            echo "CRITICAL FAULT: Tunnel generation timed out or failed to extract link."
+            echo "Dumping raw terminal log data content:"
             cat tunnel.log
             exit 1
           fi
@@ -73,7 +78,7 @@ jobs:
           CLEAN_URL=$(echo "$LIVE_URL" | tr -d '[:space:]')
           
           echo "=========================================================="
-          echo "TUNNEL PATH ASSIGNED: ${CLEAN_URL}"
+          echo "VALIDATED PATH POINTER: ${CLEAN_URL}"
           echo "COMMENCING EDGE ROUTING HANDSHAKE VERIFICATION..."
           echo "=========================================================="
           

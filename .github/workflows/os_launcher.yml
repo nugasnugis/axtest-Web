@@ -42,34 +42,31 @@ jobs:
           nohup websockify --web /usr/share/novnc/ 8080 localhost:5900 > websockify.log 2>&1 &
           sleep 3
 
-      - name: Start Localhost.run Tunnel & Export Dynamic URL
+      - name: Start Serveo Tunnel & Export Dynamic URL
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Allocate an unbuffered stream channel by using a background terminal pipe process
-          ssh -tt -R 80:localhost:8080 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null nokey@localhost.run > tunnel.log 2>&1 &
+          # Launch Serveo tunnel in the background pointing directly to your noVNC port (8080)
+          ssh -tt -R 80:localhost:8080 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null serveo.net > tunnel.log 2>&1 &
           
-          echo "Waiting for localhost.run edge servers to allocate routing lane..."
+          echo "Waiting for Serveo edge nodes to allocate live routing lane..."
           
-          # ULTRA-PRECISE LOG STREAMER & PARSER
-          # Loops up to 60 seconds, checking the log file every 2 seconds for a unique live link address
+          # SMART POLLING TUNNEL CHECKER
+          # Loops up to 60 seconds, checking the log file every 2 seconds for a real live link address
           LIVE_URL=""
           for i in {1..30}; do
             sleep 2
-            
-            # FIXED FILTER: Explicitly blocks 'admin' and ensures it searches strictly for lines containing 'lhr.life' or dynamic tunnel links
-            LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+" tunnel.log | grep -E "(\.lhr\.life|\.lhrtunnel\.link)" | grep -v "admin" | head -n 1)
-            
+            LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+\.serveo\.net" tunnel.log | head -n 1)
             if [ ! -z "$LIVE_URL" ]; then
-              echo "Real public tunnel path located successfully: $LIVE_URL"
+              echo "Success! Allocated live Serveo server routing lane: $LIVE_URL"
               break
             fi
-            echo "Waiting for connection handshake... ($((i * 2))s elapsed)"
+            echo "Waiting for proxy node allocation handshake... ($((i * 2))s elapsed)"
           done
           
           if [ -z "$LIVE_URL" ]; then
-            echo "CRITICAL FAULT: Tunnel generation timed out or failed to extract link."
-            echo "Dumping raw terminal log data content:"
+            echo "CRITICAL FAULT: Serveo generation timed out after 60 seconds."
+            echo "Dumping diagnostic raw logs content:"
             cat tunnel.log
             exit 1
           fi
@@ -79,26 +76,25 @@ jobs:
           
           echo "=========================================================="
           echo "VALIDATED PATH POINTER: ${CLEAN_URL}"
-          echo "COMMENCING EDGE ROUTING HANDSHAKE VERIFICATION..."
+          echo "COMMENCING WEB HANDSHAKE INTEGRITY VERIFICATION..."
           echo "=========================================================="
           
           # WEB INTEGRITY VERIFICATION LOOP
-          # Forces the runner to poll the real HTTP link until it stops throwing errors or empty responses
           for j in {1..20}; do
             HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${CLEAN_URL}/vnc.html" || echo "000")
-            if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "302" ] || [ "$HTTP_STATUS" = "404" ] || [ "$HTTP_STATUS" = "405" ]; then
-              echo "Edge routing lane confirmed active with HTTP Status Code: ${HTTP_STATUS}"
+            if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "302" ]; then
+              echo "Serveo edge network layer confirmed fully active with HTTP Code: ${HTTP_STATUS}"
               break
             fi
-            echo "Gateway signaling latency detected (HTTP ${HTTP_STATUS}). Re-verifying node mapping in 3s... ($((j * 3))s)"
+            echo "Gateway signaling latency detected (HTTP ${HTTP_STATUS}). Re-verifying node mapping in 3s..."
             sleep 3
           done
           
-          # Print log cache directly into the main execution console frame
+          # Print the raw background logs directly to the main terminal console
           cat tunnel.log
           
-          # Overwrite session.json only after the link is physically verified as working
-          echo "{\"status\": \"ready\", \"url\": \"${CLEAN_URL}?autoconnect=true&resize=scale\"}" > session.json
+          # Overwrite session.json with the true state format expected by Vercel /api/status
+          echo "{\"status\": \"ready\", \"url\": \"${CLEAN_URL}/vnc.html?autoconnect=true&resize=scale\"}" > session.json
           
           # Commit the working ready flag back to the repository data matrix tracking
           git config --global user.name "AxelOS-Launcher-Bot"

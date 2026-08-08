@@ -101,21 +101,36 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Checking virtualization support..."
+          QEMU_ACCEL_ARGS=()
 
-          if [ -e /dev/kvm ]; then
-            echo "/dev/kvm is available."
-            QEMU_ACCEL="-accel kvm"
+          if [ -e /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            echo "Testing KVM access..."
+
+            if timeout 5 qemu-system-x86_64 \
+                -accel kvm \
+                -machine type=pc \
+                -nodefaults \
+                -display none \
+                -S \
+                >/tmp/kvm-test.log 2>&1; then
+
+              echo "KVM is usable."
+              QEMU_ACCEL_ARGS=(-accel kvm)
+
+            else
+              echo "KVM exists but cannot be used."
+              cat /tmp/kvm-test.log || true
+              echo "Falling back to software emulation."
+            fi
           else
-            echo "/dev/kvm is NOT available."
-            echo "Falling back to software emulation."
-            QEMU_ACCEL=""
+            echo "KVM device is unavailable or inaccessible."
+            echo "Using software emulation."
           fi
 
           echo "Starting QEMU..."
 
           qemu-system-x86_64 \
-            ${QEMU_ACCEL} \
+            "${QEMU_ACCEL_ARGS[@]}" \
             -machine type=pc \
             -m 4096 \
             -smp 2 \
@@ -142,14 +157,11 @@ jobs:
             exit 1
           fi
 
-          echo "QEMU is running."
-          echo "PID: $QEMU_PID"
-
-          echo "Checking VNC port..."
+          echo "QEMU running with PID $QEMU_PID"
 
           for i in {1..30}; do
             if ss -ltn | grep -q ':5900 '; then
-              echo "VNC server is listening on 127.0.0.1:5900"
+              echo "VNC is ready on 127.0.0.1:5900"
               break
             fi
 
@@ -157,7 +169,7 @@ jobs:
           done
 
           if ! ss -ltn | grep -q ':5900 '; then
-            echo "ERROR: QEMU VNC server did not start."
+            echo "ERROR: VNC server failed to start."
             exit 1
           fi
 

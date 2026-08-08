@@ -49,12 +49,13 @@ jobs:
           # Download and extract the version of bore that supports the local command
           curl -LO https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
           tar -xzf bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
-          sudo chmod +x bore
+          chmod +x bore
           
           echo "Initializing secure connection bridge to public Bore infrastructure clusters..."
           
           # MATCHING YOUR TERMINAL: Uses the exact command structure from your PiServer
           ./bore local 8080 --to bore.pub > bore.log 2>&1 &
+          echo "initiated..."
           
           # SMART LOG STREAMER & PARSER
           # Loops up to 60 seconds, checking the log file every 2 seconds for the remote_port value

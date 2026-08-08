@@ -54,7 +54,7 @@ jobs:
           echo "Initializing secure connection bridge to public Bore infrastructure clusters..."
           
           # Spin up the background tunnel thread mapping your local noVNC port (8080) to the global server
-          ./bore local 8080 --to bore.pub > bore.log 2>&1 &
+          ./bore --local-port 8080 --to bore.pub > bore.log 2>&1 &
           
           # SMART LOG STREAMER & PARSER
           # Loops up to 60 seconds, checking the log file every 2 seconds for the randomly assigned port number

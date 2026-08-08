@@ -42,64 +42,88 @@ jobs:
           nohup websockify --web /usr/share/novnc/ 8080 localhost:5900 > websockify.log 2>&1 &
           sleep 3
 
-      - name: Start High-Performance Bore TCP Tunnel & Export Dynamic URL
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Start Bore TCP Tunnel & Export Dynamic URL
         run: |
-          # Download and extract the version of bore that supports the local command
-          curl -LO https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
+          set -e
+
+          echo "Downloading Bore..."
+
+          curl -fL -o bore.tar.gz \
+            https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
+
           tar -xzf bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
           chmod +x bore
-          
-          echo "Initializing secure connection bridge to public Bore infrastructure clusters..."
-          
-          # MATCHING YOUR TERMINAL: Uses the exact command structure from your PiServer
+
+          echo "Starting Bore tunnel..."
+
           ./bore local 8080 --to bore.pub > bore.log 2>&1 &
-          echo "initiated..."
-          
-          # SMART LOG STREAMER & PARSER
-          # Loops up to 60 seconds, checking the log file every 2 seconds for the remote_port value
-          BORE_PORT=""
+          BORE_PID=$!
+
+          echo "Bore PID: $BORE_PID"
+
+          BORE_ENDPOINT=""
+
           for i in {1..30}; do
             sleep 2
-            if [ -f bore.log ]; then
-              # MATCHING YOUR LOGS: Extracts the number right after 'remote_port='
-              BORE_PORT=$(grep -oE "remote_port=[0-9]+" bore.log | grep -oE "[0-9]+")
-              if [ ! -z "$BORE_PORT" ]; then
-                echo "----------------------------------------------------------"
-                echo "SUCCESS! Allocated active public routing port: $BORE_PORT"
-                echo "----------------------------------------------------------"
-                break
-              fi
+
+            echo "---- Bore log ($((i * 2))s) ----"
+            cat bore.log || true
+            echo "-----------------------------"
+
+            # Bore prints something containing:
+            # listening at bore.pub:<PORT>
+            BORE_ENDPOINT=$(grep -i "listening at" bore.log | \
+              sed -E 's/.*listening at[[:space:]]+//' | \
+              head -n 1 || true)
+
+            if [ -n "$BORE_ENDPOINT" ]; then
+              echo "Bore tunnel established: $BORE_ENDPOINT"
+              break
             fi
-            echo "Waiting for proxy server configuration allocation... ($((i * 2))s elapsed)"
+
+            # Detect Bore crashing immediately.
+            if ! kill -0 "$BORE_PID" 2>/dev/null; then
+              echo "ERROR: Bore process exited."
+              echo "Bore log:"
+              cat bore.log
+              exit 1
+            fi
           done
-          
-          if [ -z "$BORE_PORT" ]; then
-            echo "----------------------------------------"
-            echo "CRITICAL FAULT: Bore tunnel generation timed out after 60 seconds."
-            echo "Dumping raw terminal log data content:"
-            if [ -f bore.log ]; then cat bore.log; fi
-            echo "----------------------------------------"
+
+          if [ -z "$BORE_ENDPOINT" ]; then
+            echo "ERROR: Bore tunnel did not initialize."
+            echo "Final Bore log:"
+            cat bore.log || true
             exit 1
           fi
-          
-          # Print the background logs directly to your main terminal log workspace console
-          cat bore.log
-          
-          # Construct the clean routing link string targeting the assigned bore port parameter
-          LIVE_URL="http://bore.pub:${BORE_PORT}"
-          
-          # Overwrite session.json with the true state format expected by your Vercel status checker
-          echo "{\"status\": \"ready\", \"url\": \"${LIVE_URL}/vnc.html?autoconnect=true&resize=scale\"}" > session.json
-          
-          # Commit the data metrics parameters back to your repository tracking branch
+
+          BORE_HOST=$(echo "$BORE_ENDPOINT" | cut -d: -f1)
+          BORE_PORT=$(echo "$BORE_ENDPOINT" | cut -d: -f2)
+
+          echo "========================================"
+          echo "Bore tunnel ready"
+          echo "Host: $BORE_HOST"
+          echo "Port: $BORE_PORT"
+          echo "========================================"
+
+          LIVE_URL="http://${BORE_HOST}:${BORE_PORT}"
+
+          echo "Public URL:"
+          echo "${LIVE_URL}"
+
+          cat > session.json <<EOF
+          {
+            "status": "ready",
+            "url": "${LIVE_URL}/vnc.html?autoconnect=true&resize=scale"
+          }
+          EOF
+
           git config --global user.name "AxelOS-Launcher-Bot"
           git config --global user.email "actions@github.com"
+
           git add session.json
           git commit -m "System ready for verification check [skip ci]" || true
           git push
-
 
       - name: Live Activity Monitor & Auto-Shutdown Daemon
         env:

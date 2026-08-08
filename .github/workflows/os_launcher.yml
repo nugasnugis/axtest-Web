@@ -49,7 +49,7 @@ jobs:
           # Download and extract the version of bore that supports the local command
           curl -LO https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
           tar -xzf bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
-          chmod +x bore
+          sudo chmod +x bore
           
           echo "Initializing secure connection bridge to public Bore infrastructure clusters..."
           

@@ -49,12 +49,12 @@ jobs:
           # Download and extract the official compiled linux amd64 architecture binary utilities for bore
           curl -LO https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
           tar -xzf bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
-          chmod +x bore
+          sudo chmod +x bore
           
           echo "Initializing secure connection bridge to public Bore infrastructure clusters..."
           
           # Spin up the background tunnel thread mapping your local noVNC port (8080) to the global server
-          ./bore local 8080 --to bore.pub > bore.log 2>&1 || ./bore local -p 8080 --to bore.pub > bore.log 2>&1 &
+          ./bore local 8080 --to bore.pub > bore.log 2>&1 &
           
           # SMART LOG STREAMER & PARSER
           # Loops up to 60 seconds, checking the log file every 2 seconds for the randomly assigned port number

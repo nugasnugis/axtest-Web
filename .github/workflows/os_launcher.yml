@@ -42,67 +42,56 @@ jobs:
           nohup websockify --web /usr/share/novnc/ 8080 localhost:5900 > websockify.log 2>&1 &
           sleep 3
 
-      - name: Start Serveo Tunnel & Export Dynamic URL
+      - name: Start High-Performance Bore TCP Tunnel & Export Dynamic URL
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Launch Serveo tunnel in the background pointing directly to your noVNC port (8080)
-          ssh -tt -R 80:localhost:8080 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null serveo.net > tunnel.log 2>&1 &
+          # Download and extract the official compiled linux amd64 architecture binary utilities for bore
+          curl -LO https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
+          tar -xzf bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
+          chmod +x bore
           
-          echo "Waiting for Serveo edge nodes to allocate live routing lane..."
+          echo "Initializing secure connection bridge to public Bore infrastructure clusters..."
           
-          # SMART POLLING TUNNEL CHECKER
-          # Loops up to 60 seconds, checking the log file every 2 seconds for a real live link address
-          LIVE_URL=""
+          # Spin up the background tunnel thread mapping your local noVNC port (8080) to the global server
+          ./bore local 8080 --to bore.pub > bore.log 2>&1 &
+          
+          # SMART LOG STREAMER & PARSER
+          # Loops up to 60 seconds, checking the log file every 2 seconds for the randomly assigned port number
+          BORE_PORT=""
           for i in {1..30}; do
             sleep 2
-            LIVE_URL=$(grep -oE "https://[a-zA-Z0-9.-]+\.serveo\.net" tunnel.log | head -n 1)
-            if [ ! -z "$LIVE_URL" ]; then
-              echo "Success! Allocated live Serveo server routing lane: $LIVE_URL"
+            BORE_PORT=$(grep -oE "listening on bore.pub:[0-9]+" bore.log | grep -oE "[0-9]+")
+            if [ ! -z "$BORE_PORT" ]; then
+              echo "Success! Allocated active public routing port: $BORE_PORT"
               break
             fi
-            echo "Waiting for proxy node allocation handshake... ($((i * 2))s elapsed)"
+            echo "Waiting for proxy server configuration allocation... ($((i * 2))s elapsed)"
           done
           
-          if [ -z "$LIVE_URL" ]; then
-            echo "CRITICAL FAULT: Serveo generation timed out after 60 seconds."
+          if [ -z "$BORE_PORT" ]; then
+            echo "CRITICAL FAULT: Bore tunnel generation timed out after 60 seconds."
             echo "Dumping diagnostic raw logs content:"
-            cat tunnel.log
+            cat bore.log
             exit 1
           fi
           
-          # Strip out trailing spaces or hidden newline characters from the output variable
-          CLEAN_URL=$(echo "$LIVE_URL" | tr -d '[:space:]')
+          # Print the background logs directly to your main terminal log workspace console
+          cat bore.log
           
-          echo "=========================================================="
-          echo "VALIDATED PATH POINTER: ${CLEAN_URL}"
-          echo "COMMENCING WEB HANDSHAKE INTEGRITY VERIFICATION..."
-          echo "=========================================================="
+          # Construct the clean routing link string targeting the assigned bore port parameter
+          # Note: Bore is a raw TCP tunnel, so we access it over http via the mapped port address
+          LIVE_URL="http://bore.pub:${BORE_PORT}"
           
-          # WEB INTEGRITY VERIFICATION LOOP
-          for j in {1..20}; do
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${CLEAN_URL}/vnc.html" || echo "000")
-            if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "302" ]; then
-              echo "Serveo edge network layer confirmed fully active with HTTP Code: ${HTTP_STATUS}"
-              break
-            fi
-            echo "Gateway signaling latency detected (HTTP ${HTTP_STATUS}). Re-verifying node mapping in 3s..."
-            sleep 3
-          done
+          # Overwrite session.json with the true state format expected by your Vercel status checker
+          echo "{\"status\": \"ready\", \"url\": \"${LIVE_URL}/vnc.html?autoconnect=true&resize=scale\"}" > session.json
           
-          # Print the raw background logs directly to the main terminal console
-          cat tunnel.log
-          
-          # Overwrite session.json with the true state format expected by Vercel /api/status
-          echo "{\"status\": \"ready\", \"url\": \"${CLEAN_URL}/vnc.html?autoconnect=true&resize=scale\"}" > session.json
-          
-          # Commit the working ready flag back to the repository data matrix tracking
+          # Commit the data metrics parameters back to your repository tracking branch
           git config --global user.name "AxelOS-Launcher-Bot"
           git config --global user.email "actions@github.com"
           git add session.json
           git commit -m "System ready for verification check [skip ci]" || true
           git push
-
 
       - name: Live Activity Monitor & Auto-Shutdown Daemon
         env:

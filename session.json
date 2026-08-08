@@ -1,1 +1,4 @@
-{"status": "offline", "url": ""}
+{
+  "status": "ready",
+  "url": "http://bore.pub:50866/vnc.html?autoconnect=true&resize=scale"
+}

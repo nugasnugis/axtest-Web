@@ -46,34 +46,40 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Download and extract the official compiled linux amd64 architecture binary utilities for bore
+          # Download and extract the version of bore that supports the local command
           curl -LO https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
           tar -xzf bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
-          sudo chmod +x bore
+          chmod +x bore
           
           echo "Initializing secure connection bridge to public Bore infrastructure clusters..."
           
-          # Spin up the background tunnel thread mapping your local noVNC port (8080) to the global server
+          # MATCHING YOUR TERMINAL: Uses the exact command structure from your PiServer
           ./bore local 8080 --to bore.pub > bore.log 2>&1 &
-          cat bore.log
           
           # SMART LOG STREAMER & PARSER
-          # Loops up to 60 seconds, checking the log file every 2 seconds for the randomly assigned port number
+          # Loops up to 60 seconds, checking the log file every 2 seconds for the remote_port value
           BORE_PORT=""
           for i in {1..30}; do
             sleep 2
-            BORE_PORT=$(grep -oE "listening on bore.pub:[0-9]+" bore.log | grep -oE "[0-9]+")
-            if [ ! -z "$BORE_PORT" ]; then
-              echo "Success! Allocated active public routing port: $BORE_PORT"
-              break
+            if [ -f bore.log ]; then
+              # MATCHING YOUR LOGS: Extracts the number right after 'remote_port='
+              BORE_PORT=$(grep -oE "remote_port=[0-9]+" bore.log | grep -oE "[0-9]+")
+              if [ ! -z "$BORE_PORT" ]; then
+                echo "----------------------------------------------------------"
+                echo "SUCCESS! Allocated active public routing port: $BORE_PORT"
+                echo "----------------------------------------------------------"
+                break
+              fi
             fi
             echo "Waiting for proxy server configuration allocation... ($((i * 2))s elapsed)"
           done
           
           if [ -z "$BORE_PORT" ]; then
+            echo "----------------------------------------"
             echo "CRITICAL FAULT: Bore tunnel generation timed out after 60 seconds."
-            echo "Dumping diagnostic raw logs content:"
-            cat bore.log
+            echo "Dumping raw terminal log data content:"
+            if [ -f bore.log ]; then cat bore.log; fi
+            echo "----------------------------------------"
             exit 1
           fi
           
@@ -81,7 +87,6 @@ jobs:
           cat bore.log
           
           # Construct the clean routing link string targeting the assigned bore port parameter
-          # Note: Bore is a raw TCP tunnel, so we access it over http via the mapped port address
           LIVE_URL="http://bore.pub:${BORE_PORT}"
           
           # Overwrite session.json with the true state format expected by your Vercel status checker
@@ -93,6 +98,7 @@ jobs:
           git add session.json
           git commit -m "System ready for verification check [skip ci]" || true
           git push
+
 
       - name: Live Activity Monitor & Auto-Shutdown Daemon
         env:

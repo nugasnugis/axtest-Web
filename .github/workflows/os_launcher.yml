@@ -1,4 +1,5 @@
 name: Native Cloud OS Live Boot
+
 on:
   repository_dispatch:
     types: [launch_os]
@@ -6,182 +7,541 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: native-cloud-os-live-session
+  cancel-in-progress: false
+
 jobs:
   run-vm:
     runs-on: ubuntu-latest
+    timeout-minutes: 250
+
     steps:
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
       - name: Checkout Code
         uses: actions/checkout@v4
-        
-      - name: Install Virtualization, Display, and Tracking Tools
-        run: |
-          # Replaced netstat-pn with the correct package bundle identifier net-tools
-          sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 novnc websockify curl jq xdotool net-tools
 
-      - name: Download AxelOS ISO to Cloud Disk
+      # ============================================================
+      # INSTALL DEPENDENCIES
+      # ============================================================
+      - name: Install Virtualization and Web Tools
+        shell: bash
         run: |
-          curl -L -o custom-os.iso "https://archive.org/download/axelos-amd64/axelos-amd64.iso"
-          
-      - name: Boot Debian KDE with Software Emulation
+          set -euo pipefail
+
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            qemu-system-x86 \
+            qemu-utils \
+            novnc \
+            websockify \
+            curl \
+            jq \
+            net-tools \
+            iproute2
+
+          echo "Installed versions:"
+          qemu-system-x86_64 --version
+          websockify --version || true
+          curl --version | head -n 1
+
+      # ============================================================
+      # DOWNLOAD OS
+      # ============================================================
+      - name: Download AxelOS ISO
+        shell: bash
         run: |
+          set -euo pipefail
+
+          echo "Downloading AxelOS ISO..."
+
+          curl -fL \
+            --retry 5 \
+            --retry-delay 3 \
+            -o custom-os.iso \
+            "https://archive.org/download/axelos-amd64/axelos-amd64.iso"
+
+          if [ ! -s custom-os.iso ]; then
+            echo "ERROR: ISO download failed or produced an empty file."
+            exit 1
+          fi
+
+          ls -lh custom-os.iso
+
+      # ============================================================
+      # INITIAL SESSION STATE
+      # ============================================================
+      - name: Initialize Session State
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > session.json <<'EOF'
+          {
+            "status": "booting",
+            "url": ""
+          }
+          EOF
+
+          git config user.name "AxelOS-Launcher-Bot"
+          git config user.email "actions@github.com"
+
+          git add session.json
+          git commit -m "Booting AxelOS session [skip ci]" || true
+          git push || true
+
+      # ============================================================
+      # START QEMU
+      # ============================================================
+      - name: Start AxelOS VM
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Checking virtualization support..."
+
+          if [ -e /dev/kvm ]; then
+            echo "/dev/kvm is available."
+            QEMU_ACCEL="-accel kvm"
+          else
+            echo "/dev/kvm is NOT available."
+            echo "Falling back to software emulation."
+            QEMU_ACCEL=""
+          fi
+
+          echo "Starting QEMU..."
+
           qemu-system-x86_64 \
-            -m 5120 \
+            ${QEMU_ACCEL} \
+            -machine type=pc \
+            -m 4096 \
             -smp 2 \
             -boot d \
             -cdrom custom-os.iso \
-            -vnc :0 \
+            -vnc 127.0.0.1:0 \
             -vga std \
             -display none \
-            -daemonize
+            -monitor none \
+            -daemonize \
+            -pidfile qemu.pid
 
-      - name: Customize and Start noVNC Web Interface
-        run: |
-          sudo sed -i 's/noVNC/AxelOS Live Sandbox/g' /usr/share/novnc/vnc.html
-          echo "body { background: #0b0f19 !important; }" | sudo tee -a /usr/share/novnc/app/styles/base.css > /dev/null
-          nohup websockify --web /usr/share/novnc/ 8080 localhost:5900 > websockify.log 2>&1 &
-          sleep 3
+          sleep 5
 
-      - name: Start Bore TCP Tunnel & Export Dynamic URL
-        run: |
-          set -e
+          if [ ! -f qemu.pid ]; then
+            echo "ERROR: QEMU did not create a PID file."
+            exit 1
+          fi
 
-          echo "Downloading Bore..."
+          QEMU_PID=$(cat qemu.pid)
 
-          curl -fL -o bore.tar.gz \
-            https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz
+          if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+            echo "ERROR: QEMU exited immediately."
+            exit 1
+          fi
 
-          tar -xzf bore.tar.gz
-          chmod +x bore
+          echo "QEMU is running."
+          echo "PID: $QEMU_PID"
 
-          echo "Starting Bore tunnel..."
-
-          ./bore local 8080 --to bore.pub > bore.log 2>&1 &
-          BORE_PID=$!
-
-          echo "Bore PID: $BORE_PID"
-
-          BORE_ENDPOINT=""
+          echo "Checking VNC port..."
 
           for i in {1..30}; do
-            sleep 2
-
-            echo "---- Bore log ($((i * 2))s) ----"
-            cat bore.log || true
-            echo "-----------------------------"
-
-            # Bore prints something containing:
-            # listening at bore.pub:<PORT>
-            BORE_ENDPOINT=$(grep -i "listening at" bore.log | \
-              sed -E 's/.*listening at[[:space:]]+//' | \
-              head -n 1 || true)
-
-            if [ -n "$BORE_ENDPOINT" ]; then
-              echo "Bore tunnel established: $BORE_ENDPOINT"
+            if ss -ltn | grep -q ':5900 '; then
+              echo "VNC server is listening on 127.0.0.1:5900"
               break
             fi
 
-            # Detect Bore crashing immediately.
-            if ! kill -0 "$BORE_PID" 2>/dev/null; then
-              echo "ERROR: Bore process exited."
-              echo "Bore log:"
-              cat bore.log
+            sleep 1
+          done
+
+          if ! ss -ltn | grep -q ':5900 '; then
+            echo "ERROR: QEMU VNC server did not start."
+            exit 1
+          fi
+
+      # ============================================================
+      # START NOVNC / WEBSOCKIFY
+      # ============================================================
+      - name: Start noVNC Web Interface
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NOVNC_DIR="/usr/share/novnc"
+
+          if [ ! -f "$NOVNC_DIR/vnc.html" ]; then
+            echo "ERROR: noVNC installation not found."
+            find /usr/share -maxdepth 3 -iname "vnc.html" 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "Starting websockify..."
+
+          nohup websockify \
+            --web "$NOVNC_DIR" \
+            --verbose \
+            8080 \
+            127.0.0.1:5900 \
+            > websockify.log 2>&1 &
+
+          WEBSOCKIFY_PID=$!
+
+          echo "$WEBSOCKIFY_PID" > websockify.pid
+
+          sleep 3
+
+          if ! kill -0 "$WEBSOCKIFY_PID" 2>/dev/null; then
+            echo "ERROR: websockify exited."
+            cat websockify.log || true
+            exit 1
+          fi
+
+          echo "websockify running with PID $WEBSOCKIFY_PID"
+
+          if ! ss -ltn | grep -q ':8080 '; then
+            echo "ERROR: websockify is not listening on port 8080."
+            cat websockify.log || true
+            exit 1
+          fi
+
+          echo "Local noVNC server:"
+          echo "http://127.0.0.1:8080/vnc.html"
+
+      # ============================================================
+      # INSTALL CLOUDFLARED
+      # ============================================================
+      - name: Install Cloudflare cloudflared
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CLOUDFLARED_VERSION="2026.5.2"
+          CLOUDFLARED_SHA256="f7378c11f55a061b4f7f1d1bccdd07bdfd947ed95634c5f6f4ba71a20d5b1d1d"
+
+          echo "Installing cloudflared ${CLOUDFLARED_VERSION}..."
+
+          curl -fL \
+            --retry 5 \
+            --retry-delay 3 \
+            -o cloudflared.deb \
+            "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64.deb"
+
+          echo "${CLOUDFLARED_SHA256}  cloudflared.deb" | sha256sum -c -
+
+          sudo dpkg -i cloudflared.deb
+
+          cloudflared --version
+
+      # ============================================================
+      # START CLOUDFLARE QUICK TUNNEL
+      # ============================================================
+      - name: Start Cloudflare Quick Tunnel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Quick Tunnels should not use an existing cloudflared config.
+          if [ -f "$HOME/.cloudflared/config.yml" ]; then
+            mv "$HOME/.cloudflared/config.yml" \
+               "$HOME/.cloudflared/config.yml.disabled"
+          fi
+
+          if [ -f "$HOME/.cloudflared/config.yaml" ]; then
+            mv "$HOME/.cloudflared/config.yaml" \
+               "$HOME/.cloudflared/config.yaml.disabled"
+          fi
+
+          echo "Starting Cloudflare Quick Tunnel..."
+
+          nohup cloudflared tunnel \
+            --url http://127.0.0.1:8080 \
+            > cloudflared.log 2>&1 &
+
+          CLOUDFLARED_PID=$!
+
+          echo "$CLOUDFLARED_PID" > cloudflared.pid
+
+          echo "cloudflared PID: $CLOUDFLARED_PID"
+
+          TUNNEL_URL=""
+
+          for i in {1..60}; do
+            sleep 2
+
+            echo "---- cloudflared log ($((i * 2))s) ----"
+            tail -n 20 cloudflared.log || true
+            echo "----------------------------------------"
+
+            TUNNEL_URL=$(
+              grep -oE \
+                'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' \
+                cloudflared.log \
+                | head -n 1 \
+                || true
+            )
+
+            if [ -n "$TUNNEL_URL" ]; then
+              break
+            fi
+
+            if ! kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
+              echo "ERROR: cloudflared exited unexpectedly."
+              cat cloudflared.log || true
               exit 1
             fi
           done
 
-          if [ -z "$BORE_ENDPOINT" ]; then
-            echo "ERROR: Bore tunnel did not initialize."
-            echo "Final Bore log:"
-            cat bore.log || true
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "ERROR: Cloudflare Quick Tunnel URL was not detected."
+            echo ""
+            echo "Full cloudflared log:"
+            cat cloudflared.log || true
             exit 1
           fi
 
-          BORE_HOST=$(echo "$BORE_ENDPOINT" | cut -d: -f1)
-          BORE_PORT=$(echo "$BORE_ENDPOINT" | cut -d: -f2)
+          echo "=============================================="
+          echo "CLOUDFLARE QUICK TUNNEL READY"
+          echo "=============================================="
+          echo "$TUNNEL_URL"
+          echo "=============================================="
 
-          echo "========================================"
-          echo "Bore tunnel ready"
-          echo "Host: $BORE_HOST"
-          echo "Port: $BORE_PORT"
-          echo "========================================"
+          VNC_URL="${TUNNEL_URL}/vnc.html?autoconnect=true&resize=scale"
 
-          LIVE_URL="http://${BORE_HOST}:${BORE_PORT}"
+          echo "noVNC URL:"
+          echo "$VNC_URL"
+
+          # Save for later steps.
+          echo "TUNNEL_URL=$TUNNEL_URL" >> "$GITHUB_ENV"
+          echo "VNC_URL=$VNC_URL" >> "$GITHUB_ENV"
+
+          # Save state.
+          jq -n \
+            --arg url "$VNC_URL" \
+            '{
+              status: "ready",
+              url: $url
+            }' > session.json
+
+          git config user.name "AxelOS-Launcher-Bot"
+          git config user.email "actions@github.com"
+
+          git add session.json
+          git commit \
+            -m "System ready for connection [skip ci]" \
+            || true
+
+          git push
+
+      # ============================================================
+      # LIVE SESSION MONITOR
+      # ============================================================
+      - name: Live Activity Monitor & Auto-Shutdown
+        shell: bash
+        run: |
+          set -u
+
+          echo "====================================================="
+          echo "AXELOS LIVE SESSION MONITOR"
+          echo "====================================================="
+
+          START_TIME=$(date +%s)
+
+          CLAIM_TIMEOUT=180
+          MAX_RUNTIME=14400
+
+          CONNECTED_ONCE=false
+          IDLE_TIME=0
 
           echo "Public URL:"
-          echo "${LIVE_URL}"
+          echo "${VNC_URL}"
 
-          cat > session.json <<EOF
+          while true; do
+            sleep 10
+
+            NOW=$(date +%s)
+            ELAPSED=$((NOW - START_TIME))
+
+            # -------------------------------------------------------
+            # HARD MAXIMUM RUNTIME
+            # -------------------------------------------------------
+            if [ "$ELAPSED" -ge "$MAX_RUNTIME" ]; then
+              echo "Maximum 4-hour session limit reached."
+              break
+            fi
+
+            # -------------------------------------------------------
+            # VERIFY CORE PROCESSES
+            # -------------------------------------------------------
+            if [ -f qemu.pid ]; then
+              QEMU_PID=$(cat qemu.pid)
+
+              if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+                echo "QEMU is no longer running."
+                break
+              fi
+            else
+              echo "QEMU PID file disappeared."
+              break
+            fi
+
+            if [ -f websockify.pid ]; then
+              WEBSOCKIFY_PID=$(cat websockify.pid)
+
+              if ! kill -0 "$WEBSOCKIFY_PID" 2>/dev/null; then
+                echo "websockify is no longer running."
+                break
+              fi
+            else
+              echo "websockify PID file disappeared."
+              break
+            fi
+
+            if [ -f cloudflared.pid ]; then
+              CLOUDFLARED_PID=$(cat cloudflared.pid)
+
+              if ! kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
+                echo "cloudflared is no longer running."
+                break
+              fi
+            else
+              echo "cloudflared PID file disappeared."
+              break
+            fi
+
+            # -------------------------------------------------------
+            # CHECK LOCAL WEBSOCKET PROXY CONNECTIONS
+            #
+            # Cloudflared connects to the local origin when serving
+            # requests. A live noVNC session normally keeps the
+            # WebSocket connection open.
+            # -------------------------------------------------------
+            CONNECTION_COUNT=$(
+              ss -Htan state established '( sport = :8080 )' \
+              | wc -l
+            )
+
+            echo "Elapsed: ${ELAPSED}s | Local WebSocket connections: ${CONNECTION_COUNT}"
+
+            if [ "$CONNECTION_COUNT" -gt 0 ]; then
+
+              if [ "$CONNECTED_ONCE" = "false" ]; then
+                echo "=============================================="
+                echo "USER CONNECTION DETECTED"
+                echo "=============================================="
+
+                CONNECTED_ONCE=true
+
+                jq -n \
+                  '{
+                    status: "active",
+                    url: ""
+                  }' > session.json
+
+                git config user.name "AxelOS-Launcher-Bot"
+                git config user.email "actions@github.com"
+
+                git add session.json
+                git commit \
+                  -m "User connected to live session [skip ci]" \
+                  || true
+
+                git push || true
+              fi
+
+              IDLE_TIME=0
+
+            else
+
+              if [ "$CONNECTED_ONCE" = "true" ]; then
+                echo "User connection appears to have closed."
+                echo "Ending session."
+
+                break
+              fi
+
+              IDLE_TIME=$((IDLE_TIME + 10))
+
+              echo "Waiting for user claim: ${IDLE_TIME}/${CLAIM_TIMEOUT}s"
+
+              if [ "$IDLE_TIME" -ge "$CLAIM_TIMEOUT" ]; then
+                echo "No user connected within 3 minutes."
+                break
+              fi
+
+            fi
+          done
+
+      # ============================================================
+      # CLEANUP
+      # ============================================================
+      - name: Shutdown VM and Tunnel
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          echo "====================================================="
+          echo "SHUTTING DOWN AXELOS SESSION"
+          echo "====================================================="
+
+          # Stop Cloudflare.
+          if [ -f cloudflared.pid ]; then
+            CLOUDFLARED_PID=$(cat cloudflared.pid)
+
+            if kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
+              echo "Stopping cloudflared..."
+              kill "$CLOUDFLARED_PID"
+              sleep 2
+            fi
+          fi
+
+          # Stop websockify.
+          if [ -f websockify.pid ]; then
+            WEBSOCKIFY_PID=$(cat websockify.pid)
+
+            if kill -0 "$WEBSOCKIFY_PID" 2>/dev/null; then
+              echo "Stopping websockify..."
+              kill "$WEBSOCKIFY_PID"
+              sleep 2
+            fi
+          fi
+
+          # Stop QEMU.
+          if [ -f qemu.pid ]; then
+            QEMU_PID=$(cat qemu.pid)
+
+            if kill -0 "$QEMU_PID" 2>/dev/null; then
+              echo "Stopping QEMU..."
+              kill "$QEMU_PID"
+              sleep 3
+            fi
+          fi
+
+          echo "Processes stopped."
+
+          # ---------------------------------------------------------
+          # Publish offline state.
+          # ---------------------------------------------------------
+          cat > session.json <<'EOF'
           {
-            "status": "ready",
-            "url": "${LIVE_URL}/vnc.html?autoconnect=true&resize=scale"
+            "status": "offline",
+            "url": ""
           }
           EOF
 
-          git config --global user.name "AxelOS-Launcher-Bot"
-          git config --global user.email "actions@github.com"
+          git config user.name "AxelOS-Launcher-Bot"
+          git config user.email "actions@github.com"
 
           git add session.json
-          git commit -m "System ready for verification check [skip ci]" || true
-          git push
 
-      - name: Live Activity Monitor & Auto-Shutdown Daemon
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
+          git commit \
+            -m "Session ended [skip ci]" \
+            || true
+
+          git push || true
+
           echo "====================================================="
-          echo "STARTING DISTROSEA ACTIVITY MONITORING DAEMON..."
+          echo "SESSION CLEANUP COMPLETE"
           echo "====================================================="
-          
-          # Initialize baseline activity markers
-          IDLE_TIME=0
-          CONNECTED_ONCE=false
-          
-          while true; do
-            sleep 10
-            
-            # Check if a user browser is physically connected to the websockify port (8080)
-            CONNECTION_COUNT=$(netstat -an | grep 8080 | grep ESTABLISHED | wc -l)
-            
-            if [ "$CONNECTION_COUNT" -gt 0 ]; then
-              if [ "$CONNECTED_ONCE" = "false" ]; then
-                echo "User entry detected! Locking session into active parameters."
-                CONNECTED_ONCE=true
-                
-                # Update status profile to active so Vercel locks out duplicate launches safely
-                echo "{\"status\": \"active\", \"url\": \"\"}" > session.json
-                git add session.json
-                git commit -m "User connected. Queue path locked [skip ci]" || true
-                git push
-              fi
-              
-              # Reset idle timer because user is actively connected
-              IDLE_TIME=0
-            else
-              # If someone was connected but dropped out (tab closed), shut down immediately!
-              if [ "$CONNECTED_ONCE" = "true" ]; then
-                echo "User closed tab window connection. Triggering shutdown pipeline sequence..."
-                break
-              fi
-              
-              # FALLBACK TIMEOUT: If nobody connects within 3 minutes of boot up, drop the server
-              IDLE_TIME=$((IDLE_TIME + 10))
-              if [ "$IDLE_TIME" -ge 180 ]; then
-                echo "No user claimed the reservation window within 3 minutes. Clearing slot..."
-                break
-              fi
-            fi
-            
-            # HARD CAP SAFETY FALLBACK: Force shutdown at 4 hours max
-            if [ "$SECONDS" -ge 14400 ]; then
-              echo "Session reached maximum runtime block limit."
-              break
-            fi
-          done
-          
-          # SHUTDOWN PROCESSOR: Wipe the repository state database completely clean
-          echo "Wiping token cache mappings and shifting back to offline status..."
-          echo "{\"status\": \"offline\", \"url\": \"\"}" > session.json
-          git add session.json
-          git commit -m "Session destroyed. Moving to next queue slot [skip ci]" || true
-          git push

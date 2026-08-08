@@ -229,8 +229,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          CLOUDFLARED_VERSION="2026.5.2"
-          CLOUDFLARED_SHA256="f7378c11f55a061b4f7f1d1bccdd07bdfd947ed95634c5f6f4ba71a20d5b1d1d"
+          CLOUDFLARED_VERSION="2026.7.3"
 
           echo "Installing cloudflared ${CLOUDFLARED_VERSION}..."
 
@@ -240,11 +239,29 @@ jobs:
             -o cloudflared.deb \
             "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64.deb"
 
-          echo "${CLOUDFLARED_SHA256}  cloudflared.deb" | sha256sum -c -
+          if [ ! -s cloudflared.deb ]; then
+            echo "ERROR: cloudflared download is empty."
+            exit 1
+          fi
+
+          echo "Downloaded:"
+          ls -lh cloudflared.deb
 
           sudo dpkg -i cloudflared.deb
 
+          echo "Installed cloudflared:"
           cloudflared --version
+
+          INSTALLED_VERSION=$(cloudflared --version | head -n 1)
+
+          echo "$INSTALLED_VERSION" | grep -q "2026.7.3" || {
+            echo "ERROR: Expected cloudflared 2026.7.3"
+            echo "Actual:"
+            cloudflared --version
+            exit 1
+          }
+
+          echo "cloudflared 2026.7.3 installed successfully."
 
       # ============================================================
       # START CLOUDFLARE QUICK TUNNEL

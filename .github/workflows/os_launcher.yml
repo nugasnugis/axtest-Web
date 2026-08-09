@@ -1,32 +1,51 @@
-name: Native Cloud OS Live Boot
+name: AxelOS Cloud Desktop
 
 on:
   repository_dispatch:
-    types: [launch_os]
+    types:
+      - launch_os
 
 permissions:
   contents: write
 
 concurrency:
-  group: native-cloud-os-live-session
+  group: axelos-cloud-session
   cancel-in-progress: false
 
+env:
+  AXELOS_INACTIVITY_SECONDS: 900
+  AXELOS_CLAIM_TIMEOUT_SECONDS: 180
+  AXELOS_DISCONNECT_GRACE_SECONDS: 60
+  AXELOS_MAX_RUNTIME_SECONDS: 14400
+
+  CLOUDFLARED_VERSION: "2026.7.3"
+
+  VM_MEMORY: "4096"
+  VM_CPUS: "2"
+
 jobs:
+
   run-vm:
+
     runs-on: ubuntu-latest
+
     timeout-minutes: 250
 
     steps:
-      # ============================================================
+
+      # ==========================================================
       # CHECKOUT
-      # ============================================================
-      - name: Checkout Code
+      # ==========================================================
+
+      - name: Checkout AxelOS
         uses: actions/checkout@v4
 
-      # ============================================================
-      # INSTALL DEPENDENCIES
-      # ============================================================
-      - name: Install Virtualization and Web Tools
+
+      # ==========================================================
+      # INSTALL
+      # ==========================================================
+
+      - name: Install Runtime
         shell: bash
         run: |
           set -euo pipefail
@@ -37,26 +56,81 @@ jobs:
             qemu-system-x86 \
             qemu-utils \
             novnc \
-            websockify \
+            python3 \
+            python3-pip \
             curl \
             jq \
-            net-tools \
-            iproute2
+            iproute2 \
+            ca-certificates
 
-          echo "Installed versions:"
+          python3 -m pip install \
+            --user \
+            "websockify==0.13.0"
+
+          export PATH="$HOME/.local/bin:$PATH"
+
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+          echo "QEMU:"
           qemu-system-x86_64 --version
-          websockify --version || true
-          curl --version | head -n 1
 
-      # ============================================================
-      # DOWNLOAD OS
-      # ============================================================
+          echo "websockify:"
+          websockify --version
+
+
+      # ==========================================================
+      # INITIAL STATE
+      # ==========================================================
+
+      - name: Initialize Session
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SESSION_ID="$(
+            python3 - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(18))
+          PY
+          )"
+
+          echo "SESSION_ID=$SESSION_ID" >> "$GITHUB_ENV"
+
+          jq -n \
+            --arg id "$SESSION_ID" \
+            '{
+              status: "booting",
+              url: "",
+              session_id: $id,
+              started_at: now | todate
+            }' \
+            > session.json
+
+          git config user.name \
+            "AxelOS-Launcher-Bot"
+
+          git config user.email \
+            "actions@github.com"
+
+          git add session.json
+
+          git commit \
+            -m "AxelOS session booting [skip ci]" \
+            || true
+
+          git push || true
+
+
+      # ==========================================================
+      # DOWNLOAD AXELOS
+      # ==========================================================
+
       - name: Download AxelOS ISO
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Downloading AxelOS ISO..."
+          echo "Downloading AxelOS..."
 
           curl -fL \
             --retry 5 \
@@ -64,38 +138,103 @@ jobs:
             -o custom-os.iso \
             "https://archive.org/download/axelos-amd64/axelos-amd64.iso"
 
-          if [ ! -s custom-os.iso ]; then
-            echo "ERROR: ISO download failed or produced an empty file."
-            exit 1
-          fi
+          test -s custom-os.iso
 
           ls -lh custom-os.iso
 
-      # ============================================================
-      # INITIAL SESSION STATE
-      # ============================================================
-      - name: Initialize Session State
+
+      # ==========================================================
+      # PREPARE CUSTOM NOVNC
+      # ==========================================================
+
+      - name: Build AxelOS noVNC UI
         shell: bash
         run: |
           set -euo pipefail
 
-          cat > session.json <<'EOF'
-          {
-            "status": "booting",
-            "url": ""
-          }
-          EOF
+          NOVNC_DIR="$HOME/axelos-novnc"
 
-          git config user.name "AxelOS-Launcher-Bot"
-          git config user.email "actions@github.com"
+          rm -rf "$NOVNC_DIR"
 
-          git add session.json
-          git commit -m "Booting AxelOS session [skip ci]" || true
-          git push || true
+          mkdir -p "$NOVNC_DIR"
 
-      # ============================================================
+          cp -a \
+            /usr/share/novnc/. \
+            "$NOVNC_DIR/"
+
+          cp axelos.css \
+            "$NOVNC_DIR/axelos.css"
+
+          cp axelos-ui.js \
+            "$NOVNC_DIR/axelos-ui.js"
+
+          # ------------------------------------------------------
+          # Use the AxelOS website favicon as a visual accent
+          # when available.
+          # ------------------------------------------------------
+
+          curl -fL \
+            --max-time 15 \
+            -o "$NOVNC_DIR/axelos-favicon.ico" \
+            "https://www.axelos.run.place/favicon.ico" \
+            || true
+
+          python3 - "$NOVNC_DIR/vnc.html" <<'PY'
+          import sys
+
+          path = sys.argv[1]
+
+          with open(
+              path,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              html = f.read()
+
+          html = html.replace(
+              "<title>noVNC</title>",
+              "<title>AxelOS Cloud Desktop</title>"
+          )
+
+          if "axelos.css" not in html:
+              html = html.replace(
+                  "</head>",
+                  '<link rel="stylesheet" href="axelos.css">'
+                  "</head>",
+                  1
+              )
+
+          if "axelos-ui.js" not in html:
+              html = html.replace(
+                  "</body>",
+                  '<script src="axelos-ui.js"></script>'
+                  "</body>",
+                  1
+              )
+
+          if "axelos-favicon.ico" not in html:
+              html = html.replace(
+                  "</head>",
+                  '<link rel="icon" href="axelos-favicon.ico">'
+                  "</head>",
+                  1
+              )
+
+          with open(
+              path,
+              "w",
+              encoding="utf-8"
+          ) as f:
+              f.write(html)
+          PY
+
+          echo "Custom AxelOS noVNC prepared."
+
+
+      # ==========================================================
       # START QEMU
-      # ============================================================
+      # ==========================================================
+
       - name: Start AxelOS VM
         shell: bash
         run: |
@@ -103,10 +242,18 @@ jobs:
 
           QEMU_ACCEL_ARGS=()
 
-          if [ -e /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
-            echo "Testing KVM access..."
+          if [
+            -e /dev/kvm
+          ] && [
+            -r /dev/kvm
+          ] && [
+            -w /dev/kvm
+          ]; then
 
-            if timeout 5 qemu-system-x86_64 \
+            echo "Testing KVM..."
+
+            if timeout 5 \
+              qemu-system-x86_64 \
                 -accel kvm \
                 -machine type=pc \
                 -nodefaults \
@@ -114,26 +261,31 @@ jobs:
                 -S \
                 >/tmp/kvm-test.log 2>&1; then
 
-              echo "KVM is usable."
-              QEMU_ACCEL_ARGS=(-accel kvm)
+              echo "KVM available."
+
+              QEMU_ACCEL_ARGS=(
+                -accel
+                kvm
+              )
 
             else
-              echo "KVM exists but cannot be used."
+
+              echo "KVM unavailable."
+
               cat /tmp/kvm-test.log || true
-              echo "Falling back to software emulation."
+
             fi
-          else
-            echo "KVM device is unavailable or inaccessible."
-            echo "Using software emulation."
+
           fi
+
 
           echo "Starting QEMU..."
 
           qemu-system-x86_64 \
             "${QEMU_ACCEL_ARGS[@]}" \
             -machine type=pc \
-            -m 4096 \
-            -smp 2 \
+            -m "${VM_MEMORY}" \
+            -smp "${VM_CPUS}" \
             -boot d \
             -cdrom custom-os.iso \
             -vnc 127.0.0.1:0 \
@@ -143,95 +295,125 @@ jobs:
             -daemonize \
             -pidfile qemu.pid
 
+
           sleep 5
 
-          if [ ! -f qemu.pid ]; then
-            echo "ERROR: QEMU did not create a PID file."
+
+          test -f qemu.pid
+
+
+          QEMU_PID="$(
+            cat qemu.pid
+          )"
+
+
+          if ! kill -0 \
+            "$QEMU_PID" \
+            2>/dev/null; then
+
+            echo "QEMU exited."
+
             exit 1
+
           fi
 
-          QEMU_PID=$(cat qemu.pid)
-
-          if ! kill -0 "$QEMU_PID" 2>/dev/null; then
-            echo "ERROR: QEMU exited immediately."
-            exit 1
-          fi
-
-          echo "QEMU running with PID $QEMU_PID"
 
           for i in {1..30}; do
-            if ss -ltn | grep -q ':5900 '; then
-              echo "VNC is ready on 127.0.0.1:5900"
+
+            if ss -ltn |
+              grep -q ':5900 '; then
+
+              echo "VNC ready."
+
               break
+
             fi
 
             sleep 1
+
           done
 
-          if ! ss -ltn | grep -q ':5900 '; then
-            echo "ERROR: VNC server failed to start."
+
+          if ! ss -ltn |
+            grep -q ':5900 '; then
+
+            echo "VNC failed."
+
             exit 1
+
           fi
 
-      # ============================================================
-      # START NOVNC / WEBSOCKIFY
-      # ============================================================
-      - name: Start noVNC Web Interface
+
+      # ==========================================================
+      # START CUSTOM WEBSOCKIFY
+      # ==========================================================
+
+      - name: Start AxelOS WebSocket Gateway
         shell: bash
         run: |
           set -euo pipefail
 
-          NOVNC_DIR="/usr/share/novnc"
+          rm -rf /tmp/axelos-connections
 
-          if [ ! -f "$NOVNC_DIR/vnc.html" ]; then
-            echo "ERROR: noVNC installation not found."
-            find /usr/share -maxdepth 3 -iname "vnc.html" 2>/dev/null || true
+          mkdir -p \
+            /tmp/axelos-connections
+
+          rm -f \
+            /tmp/axelos-last-activity
+
+          AXELOS_WEB_ROOT="$HOME/axelos-novnc"
+
+          export AXELOS_WEB_ROOT
+
+          nohup \
+            python3 axelos_proxy.py \
+            > axelos-proxy.log \
+            2>&1 &
+
+          PROXY_PID="$!"
+
+          echo "$PROXY_PID" \
+            > websockify.pid
+
+          sleep 4
+
+
+          if ! kill -0 \
+            "$PROXY_PID" \
+            2>/dev/null; then
+
+            echo "AxelOS proxy failed."
+
+            cat axelos-proxy.log
+
             exit 1
+
           fi
 
-          echo "Starting websockify..."
 
-          nohup websockify \
-            --web "$NOVNC_DIR" \
-            --verbose \
-            8080 \
-            127.0.0.1:5900 \
-            > websockify.log 2>&1 &
+          if ! ss -ltn |
+            grep -q ':8080 '; then
 
-          WEBSOCKIFY_PID=$!
+            echo "Proxy did not bind port 8080."
 
-          echo "$WEBSOCKIFY_PID" > websockify.pid
+            cat axelos-proxy.log
 
-          sleep 3
-
-          if ! kill -0 "$WEBSOCKIFY_PID" 2>/dev/null; then
-            echo "ERROR: websockify exited."
-            cat websockify.log || true
             exit 1
+
           fi
 
-          echo "websockify running with PID $WEBSOCKIFY_PID"
 
-          if ! ss -ltn | grep -q ':8080 '; then
-            echo "ERROR: websockify is not listening on port 8080."
-            cat websockify.log || true
-            exit 1
-          fi
+          echo "AxelOS proxy ready."
 
-          echo "Local noVNC server:"
-          echo "http://127.0.0.1:8080/vnc.html"
 
-      # ============================================================
-      # INSTALL CLOUDFLARED
-      # ============================================================
-      - name: Install Cloudflare cloudflared
+      # ==========================================================
+      # CLOUDFLARED
+      # ==========================================================
+
+      - name: Install cloudflared
         shell: bash
         run: |
           set -euo pipefail
-
-          CLOUDFLARED_VERSION="2026.7.3"
-
-          echo "Installing cloudflared ${CLOUDFLARED_VERSION}..."
 
           curl -fL \
             --retry 5 \
@@ -239,338 +421,663 @@ jobs:
             -o cloudflared.deb \
             "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64.deb"
 
-          if [ ! -s cloudflared.deb ]; then
-            echo "ERROR: cloudflared download is empty."
-            exit 1
-          fi
+          test -s cloudflared.deb
 
-          echo "Downloaded:"
-          ls -lh cloudflared.deb
+          sudo dpkg -i \
+            cloudflared.deb
 
-          sudo dpkg -i cloudflared.deb
-
-          echo "Installed cloudflared:"
           cloudflared --version
 
-          INSTALLED_VERSION=$(cloudflared --version | head -n 1)
 
-          echo "$INSTALLED_VERSION" | grep -q "2026.7.3" || {
-            echo "ERROR: Expected cloudflared 2026.7.3"
-            echo "Actual:"
-            cloudflared --version
-            exit 1
-          }
+      # ==========================================================
+      # CLOUDFLARE QUICK TUNNEL
+      # ==========================================================
 
-          echo "cloudflared 2026.7.3 installed successfully."
-
-      # ============================================================
-      # START CLOUDFLARE QUICK TUNNEL
-      # ============================================================
       - name: Start Cloudflare Quick Tunnel
         shell: bash
         run: |
           set -euo pipefail
 
-          # Quick Tunnels should not use an existing cloudflared config.
-          if [ -f "$HOME/.cloudflared/config.yml" ]; then
-            mv "$HOME/.cloudflared/config.yml" \
-               "$HOME/.cloudflared/config.yml.disabled"
+          mkdir -p \
+            "$HOME/.cloudflared"
+
+
+          # Disable accidental config files.
+
+          if [
+            -f "$HOME/.cloudflared/config.yml"
+          ]; then
+
+            mv \
+              "$HOME/.cloudflared/config.yml" \
+              "$HOME/.cloudflared/config.yml.disabled"
+
           fi
 
-          if [ -f "$HOME/.cloudflared/config.yaml" ]; then
-            mv "$HOME/.cloudflared/config.yaml" \
-               "$HOME/.cloudflared/config.yaml.disabled"
+
+          if [
+            -f "$HOME/.cloudflared/config.yaml"
+          ]; then
+
+            mv \
+              "$HOME/.cloudflared/config.yaml" \
+              "$HOME/.cloudflared/config.yaml.disabled"
+
           fi
 
-          echo "Starting Cloudflare Quick Tunnel..."
 
-          nohup cloudflared tunnel \
-            --url http://127.0.0.1:8080 \
-            > cloudflared.log 2>&1 &
+          echo \
+            "Starting Cloudflare Quick Tunnel..."
 
-          CLOUDFLARED_PID=$!
 
-          echo "$CLOUDFLARED_PID" > cloudflared.pid
+          nohup \
+            cloudflared tunnel \
+              --url http://127.0.0.1:8080 \
+            > cloudflared.log \
+            2>&1 &
 
-          echo "cloudflared PID: $CLOUDFLARED_PID"
+
+          CLOUDFLARED_PID="$!"
+
+          echo "$CLOUDFLARED_PID" \
+            > cloudflared.pid
+
 
           TUNNEL_URL=""
 
+
           for i in {1..60}; do
+
             sleep 2
 
-            echo "---- cloudflared log ($((i * 2))s) ----"
-            tail -n 20 cloudflared.log || true
-            echo "----------------------------------------"
 
-            TUNNEL_URL=$(
+            TUNNEL_URL="$(
               grep -oE \
                 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' \
                 cloudflared.log \
                 | head -n 1 \
                 || true
-            )
+            )"
+
 
             if [ -n "$TUNNEL_URL" ]; then
               break
             fi
 
-            if ! kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
-              echo "ERROR: cloudflared exited unexpectedly."
+
+            if ! kill -0 \
+              "$CLOUDFLARED_PID" \
+              2>/dev/null; then
+
+              echo \
+                "cloudflared exited."
+
               cat cloudflared.log || true
+
               exit 1
+
             fi
+
           done
 
+
           if [ -z "$TUNNEL_URL" ]; then
-            echo "ERROR: Cloudflare Quick Tunnel URL was not detected."
-            echo ""
-            echo "Full cloudflared log:"
+
+            echo \
+              "Cloudflare URL not detected."
+
             cat cloudflared.log || true
+
             exit 1
+
           fi
 
-          echo "=============================================="
-          echo "CLOUDFLARE QUICK TUNNEL READY"
-          echo "=============================================="
-          echo "$TUNNEL_URL"
-          echo "=============================================="
 
-          VNC_URL="${TUNNEL_URL}/vnc.html?autoconnect=true&resize=scale"
+          VNC_URL=
+          "${TUNNEL_URL}/vnc.html?autoconnect=true&resize=scale"
 
-          echo "noVNC URL:"
+
+          echo "TUNNEL_URL=$TUNNEL_URL" \
+            >> "$GITHUB_ENV"
+
+          echo "VNC_URL=$VNC_URL" \
+            >> "$GITHUB_ENV"
+
+
+          echo ""
+          echo "============================================"
+          echo "AXELOS CLOUD DESKTOP READY"
+          echo "============================================"
           echo "$VNC_URL"
+          echo "============================================"
+          echo ""
 
-          # Save for later steps.
-          echo "TUNNEL_URL=$TUNNEL_URL" >> "$GITHUB_ENV"
-          echo "VNC_URL=$VNC_URL" >> "$GITHUB_ENV"
 
-          # Save state.
+          # GitHub Actions summary.
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          # ? AxelOS Cloud Desktop
+
+          ## Session Ready
+
+          **Status:** ? Ready
+
+          **Desktop:** [$VNC_URL]($VNC_URL)
+
+          **Inactivity timeout:** ${AXELOS_INACTIVITY_SECONDS}s
+
+          **Maximum runtime:** ${AXELOS_MAX_RUNTIME_SECONDS}s
+          EOF
+
+
           jq -n \
+            --arg id "$SESSION_ID" \
             --arg url "$VNC_URL" \
             '{
               status: "ready",
-              url: $url
-            }' > session.json
+              url: $url,
+              session_id: $id,
+              started_at: now | todate
+            }' \
+            > session.json
 
-          git config user.name "AxelOS-Launcher-Bot"
-          git config user.email "actions@github.com"
+
+          git config user.name \
+            "AxelOS-Launcher-Bot"
+
+          git config user.email \
+            "actions@github.com"
+
 
           git add session.json
+
           git commit \
-            -m "System ready for connection [skip ci]" \
+            -m "AxelOS desktop ready [skip ci]" \
             || true
 
           git push
 
-      # ============================================================
+
+      # ==========================================================
       # LIVE SESSION MONITOR
-      # ============================================================
-      - name: Live Activity Monitor & Auto-Shutdown
+      # ==========================================================
+
+      - name: Monitor AxelOS Session
         shell: bash
         run: |
           set -u
 
-          echo "====================================================="
-          echo "AXELOS LIVE SESSION MONITOR"
-          echo "====================================================="
+          START_TIME="$(
+            date +%s
+          )"
 
-          START_TIME=$(date +%s)
+          CLAIM_TIMEOUT="${AXELOS_CLAIM_TIMEOUT_SECONDS}"
+          INACTIVITY_TIMEOUT="${AXELOS_INACTIVITY_SECONDS}"
+          DISCONNECT_GRACE="${AXELOS_DISCONNECT_GRACE_SECONDS}"
+          MAX_RUNTIME="${AXELOS_MAX_RUNTIME_SECONDS}"
 
-          CLAIM_TIMEOUT=180
-          MAX_RUNTIME=14400
+          CLAIMED=false
 
-          CONNECTED_ONCE=false
-          IDLE_TIME=0
+          DISCONNECTED_AT=0
 
-          echo "Public URL:"
-          echo "${VNC_URL}"
+
+          echo "============================================"
+          echo "AXELOS SESSION MONITOR"
+          echo "============================================"
+
+          echo "Inactivity timeout:"
+          echo "${INACTIVITY_TIMEOUT}s"
+
+          echo "Claim timeout:"
+          echo "${CLAIM_TIMEOUT}s"
+
+          echo "Disconnect grace:"
+          echo "${DISCONNECT_GRACE}s"
+
+          echo "Maximum runtime:"
+          echo "${MAX_RUNTIME}s"
+
 
           while true; do
+
             sleep 10
 
-            NOW=$(date +%s)
-            ELAPSED=$((NOW - START_TIME))
 
-            # -------------------------------------------------------
-            # HARD MAXIMUM RUNTIME
-            # -------------------------------------------------------
-            if [ "$ELAPSED" -ge "$MAX_RUNTIME" ]; then
-              echo "Maximum 4-hour session limit reached."
-              break
-            fi
+            NOW="$(
+              date +%s
+            )"
 
-            # -------------------------------------------------------
-            # VERIFY CORE PROCESSES
-            # -------------------------------------------------------
-            if [ -f qemu.pid ]; then
-              QEMU_PID=$(cat qemu.pid)
+            ELAPSED=$(
+              (
+                NOW="$NOW"
+                START_TIME="$START_TIME"
 
-              if ! kill -0 "$QEMU_PID" 2>/dev/null; then
-                echo "QEMU is no longer running."
-                break
-              fi
-            else
-              echo "QEMU PID file disappeared."
-              break
-            fi
-
-            if [ -f websockify.pid ]; then
-              WEBSOCKIFY_PID=$(cat websockify.pid)
-
-              if ! kill -0 "$WEBSOCKIFY_PID" 2>/dev/null; then
-                echo "websockify is no longer running."
-                break
-              fi
-            else
-              echo "websockify PID file disappeared."
-              break
-            fi
-
-            if [ -f cloudflared.pid ]; then
-              CLOUDFLARED_PID=$(cat cloudflared.pid)
-
-              if ! kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
-                echo "cloudflared is no longer running."
-                break
-              fi
-            else
-              echo "cloudflared PID file disappeared."
-              break
-            fi
-
-            # -------------------------------------------------------
-            # CHECK LOCAL WEBSOCKET PROXY CONNECTIONS
-            #
-            # Cloudflared connects to the local origin when serving
-            # requests. A live noVNC session normally keeps the
-            # WebSocket connection open.
-            # -------------------------------------------------------
-            CONNECTION_COUNT=$(
-              ss -Htan state established '( sport = :8080 )' \
-              | wc -l
+                echo $(
+                  (
+                    NOW
+                    -
+                    START_TIME
+                  )
+                )
+              )
             )
 
-            echo "Elapsed: ${ELAPSED}s | Local WebSocket connections: ${CONNECTION_COUNT}"
 
-            if [ "$CONNECTION_COUNT" -gt 0 ]; then
+            # ----------------------------------------------------
+            # MAX RUNTIME
+            # ----------------------------------------------------
 
-              if [ "$CONNECTED_ONCE" = "false" ]; then
-                echo "=============================================="
-                echo "USER CONNECTION DETECTED"
-                echo "=============================================="
+            if [
+              "$ELAPSED"
+              -ge
+              "$MAX_RUNTIME"
+            ]; then
 
-                CONNECTED_ONCE=true
+              echo \
+                "Maximum runtime reached."
+
+              break
+
+            fi
+
+
+            # ----------------------------------------------------
+            # PROCESS HEALTH
+            # ----------------------------------------------------
+
+            if [ -f qemu.pid ]; then
+
+              QEMU_PID="$(
+                cat qemu.pid
+              )"
+
+              if ! kill -0 \
+                "$QEMU_PID" \
+                2>/dev/null; then
+
+                echo "QEMU stopped."
+
+                break
+
+              fi
+
+            else
+
+              echo "QEMU PID missing."
+
+              break
+
+            fi
+
+
+            if [ -f websockify.pid ]; then
+
+              PROXY_PID="$(
+                cat websockify.pid
+              )"
+
+              if ! kill -0 \
+                "$PROXY_PID" \
+                2>/dev/null; then
+
+                echo "AxelOS proxy stopped."
+
+                break
+
+              fi
+
+            else
+
+              echo "Proxy PID missing."
+
+              break
+
+            fi
+
+
+            if [ -f cloudflared.pid ]; then
+
+              CLOUDFLARED_PID="$(
+                cat cloudflared.pid
+              )"
+
+              if ! kill -0 \
+                "$CLOUDFLARED_PID" \
+                2>/dev/null; then
+
+                echo "cloudflared stopped."
+
+                break
+
+              fi
+
+            else
+
+              echo "cloudflared PID missing."
+
+              break
+
+            fi
+
+
+            # ----------------------------------------------------
+            # CONNECTION STATE
+            # ----------------------------------------------------
+
+            CONNECTION_COUNT="$(
+              find \
+                /tmp/axelos-connections \
+                -type f \
+                2>/dev/null |
+              wc -l
+            )"
+
+
+            # ----------------------------------------------------
+            # FIRST CONNECTION
+            # ----------------------------------------------------
+
+            if [
+              "$CONNECTION_COUNT"
+              -gt 0
+            ]; then
+
+              DISCONNECTED_AT=0
+
+
+              if [
+                "$CLAIMED"
+                = "false"
+              ]; then
+
+                CLAIMED=true
+
+                echo ""
+                echo "============================================"
+                echo "AXELOS SESSION CLAIMED"
+                echo "============================================"
+
 
                 jq -n \
+                  --arg id "$SESSION_ID" \
+                  --arg url "$VNC_URL" \
                   '{
                     status: "active",
-                    url: ""
-                  }' > session.json
+                    url: $url,
+                    session_id: $id
+                  }' \
+                  > session.json
 
-                git config user.name "AxelOS-Launcher-Bot"
-                git config user.email "actions@github.com"
+
+                git config user.name \
+                  "AxelOS-Launcher-Bot"
+
+                git config user.email \
+                  "actions@github.com"
 
                 git add session.json
+
                 git commit \
-                  -m "User connected to live session [skip ci]" \
+                  -m "AxelOS session active [skip ci]" \
                   || true
 
                 git push || true
-              fi
 
-              IDLE_TIME=0
+              fi
 
             else
 
-              if [ "$CONNECTED_ONCE" = "true" ]; then
-                echo "User connection appears to have closed."
-                echo "Ending session."
+              # --------------------------------------------------
+              # NEVER CLAIMED
+              # --------------------------------------------------
 
-                break
-              fi
+              if [
+                "$CLAIMED"
+                = "false"
+              ]; then
 
-              IDLE_TIME=$((IDLE_TIME + 10))
+                if [
+                  "$ELAPSED"
+                  -ge
+                  "$CLAIM_TIMEOUT"
+                ]; then
 
-              echo "Waiting for user claim: ${IDLE_TIME}/${CLAIM_TIMEOUT}s"
+                  echo \
+                    "No user claimed the session."
 
-              if [ "$IDLE_TIME" -ge "$CLAIM_TIMEOUT" ]; then
-                echo "No user connected within 3 minutes."
-                break
+                  break
+
+                fi
+
+              else
+
+                # ------------------------------------------------
+                # DISCONNECTED
+                # ------------------------------------------------
+
+                if [
+                  "$DISCONNECTED_AT"
+                  -eq
+                  0
+                ]; then
+
+                  DISCONNECTED_AT="$NOW"
+
+                  echo \
+                    "User disconnected."
+
+                fi
+
+
+                DISCONNECTED_FOR=$(
+                  (
+                    NOW="$NOW"
+                    DISCONNECTED_AT="$DISCONNECTED_AT"
+
+                    echo $(
+                      (
+                        NOW
+                        -
+                        DISCONNECTED_AT
+                      )
+                    )
+                  )
+                )
+
+
+                if [
+                  "$DISCONNECTED_FOR"
+                  -ge
+                  "$DISCONNECT_GRACE"
+                ]; then
+
+                  echo \
+                    "Disconnect grace expired."
+
+                  break
+
+                fi
+
               fi
 
             fi
+
+
+            # ----------------------------------------------------
+            # ACTUAL USER ACTIVITY
+            # ----------------------------------------------------
+
+            if [ -f /tmp/axelos-last-activity ]; then
+
+              LAST_ACTIVITY="$(
+                cat \
+                  /tmp/axelos-last-activity
+              )"
+
+              LAST_ACTIVITY_INT="${
+                LAST_ACTIVITY%.*
+              }"
+
+              if [[
+                "$LAST_ACTIVITY_INT"
+                =~ ^[0-9]+$
+              ]]; then
+
+                INACTIVE=$(
+                  (
+                    NOW="$NOW"
+                    LAST_ACTIVITY_INT="$LAST_ACTIVITY_INT"
+
+                    echo $(
+                      (
+                        NOW
+                        -
+                        LAST_ACTIVITY_INT
+                      )
+                    )
+                  )
+                )
+
+              else
+
+                INACTIVE="$ELAPSED"
+
+              fi
+
+            else
+
+              INACTIVE="$ELAPSED"
+
+            fi
+
+
+            echo \
+              "runtime=${ELAPSED}s connections=${CONNECTION_COUNT} inactivity=${INACTIVE}s"
+
+
+            # ----------------------------------------------------
+            # INACTIVITY SHUTDOWN
+            # ----------------------------------------------------
+
+            if [
+              "$CLAIMED"
+              = "true"
+            ] && [
+              "$INACTIVE"
+              -ge
+              "$INACTIVITY_TIMEOUT"
+            ]; then
+
+              echo ""
+              echo "============================================"
+              echo "AXELOS INACTIVITY LIMIT REACHED"
+              echo "============================================"
+
+              echo \
+                "No keyboard/mouse/clipboard activity for ${INACTIVE}s."
+
+              break
+
+            fi
+
           done
 
-      # ============================================================
+
+      # ==========================================================
       # CLEANUP
-      # ============================================================
-      - name: Shutdown VM and Tunnel
+      # ==========================================================
+
+      - name: Shutdown AxelOS
         if: always()
         shell: bash
         run: |
           set +e
 
-          echo "====================================================="
-          echo "SHUTTING DOWN AXELOS SESSION"
-          echo "====================================================="
+          echo "============================================"
+          echo "SHUTTING DOWN AXELOS"
+          echo "============================================"
 
-          # Stop Cloudflare.
+
           if [ -f cloudflared.pid ]; then
-            CLOUDFLARED_PID=$(cat cloudflared.pid)
 
-            if kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
-              echo "Stopping cloudflared..."
-              kill "$CLOUDFLARED_PID"
-              sleep 2
+            PID="$(
+              cat cloudflared.pid
+            )"
+
+            if kill -0 \
+              "$PID" \
+              2>/dev/null; then
+
+              kill "$PID"
+
             fi
+
           fi
 
-          # Stop websockify.
+
           if [ -f websockify.pid ]; then
-            WEBSOCKIFY_PID=$(cat websockify.pid)
 
-            if kill -0 "$WEBSOCKIFY_PID" 2>/dev/null; then
-              echo "Stopping websockify..."
-              kill "$WEBSOCKIFY_PID"
-              sleep 2
+            PID="$(
+              cat websockify.pid
+            )"
+
+            if kill -0 \
+              "$PID" \
+              2>/dev/null; then
+
+              kill "$PID"
+
             fi
+
           fi
 
-          # Stop QEMU.
+
           if [ -f qemu.pid ]; then
-            QEMU_PID=$(cat qemu.pid)
 
-            if kill -0 "$QEMU_PID" 2>/dev/null; then
-              echo "Stopping QEMU..."
-              kill "$QEMU_PID"
+            PID="$(
+              cat qemu.pid
+            )"
+
+            if kill -0 \
+              "$PID" \
+              2>/dev/null; then
+
+              kill "$PID"
+
               sleep 3
+
+              kill -9 \
+                "$PID" \
+                2>/dev/null || true
+
             fi
+
           fi
 
-          echo "Processes stopped."
 
-          # ---------------------------------------------------------
-          # Publish offline state.
-          # ---------------------------------------------------------
           cat > session.json <<'EOF'
           {
             "status": "offline",
-            "url": ""
+            "url": "",
+            "session_id": ""
           }
           EOF
 
-          git config user.name "AxelOS-Launcher-Bot"
-          git config user.email "actions@github.com"
+
+          git config user.name \
+            "AxelOS-Launcher-Bot"
+
+          git config user.email \
+            "actions@github.com"
+
 
           git add session.json
 
           git commit \
-            -m "Session ended [skip ci]" \
+            -m "AxelOS session offline [skip ci]" \
             || true
 
           git push || true
 
-          echo "====================================================="
-          echo "SESSION CLEANUP COMPLETE"
-          echo "====================================================="
+
+          echo "AxelOS shutdown complete."

@@ -1,6 +1,6 @@
 {
-  "status": "booting",
-  "url": "",
+  "status": "ready",
+  "url": "https://ryan-dublin-scan-orange.trycloudflare.com/vnc.html?autoconnect=true&resize=scale",
   "session_id": "6BRIJvrjZJqpgbrw6Kbjta8e",
-  "started_at": "2026-08-09T05:33:37Z"
+  "started_at": "2026-08-09T05:42:13Z"
 }

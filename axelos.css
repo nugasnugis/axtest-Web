@@ -1,0 +1,472 @@
+:root {
+    --ax-bg: #050811;
+    --ax-bg-2: #080d18;
+
+    --ax-blue: #4f8cff;
+    --ax-cyan: #38d9ff;
+    --ax-purple: #765cff;
+
+    --ax-green: #3ee58a;
+    --ax-orange: #ffb454;
+    --ax-red: #ff5d6c;
+
+    --ax-text: #f5f8ff;
+    --ax-muted: #8492aa;
+
+    --ax-border:
+        rgba(133, 163, 219, .16);
+}
+
+
+/*
+ * Base
+ */
+
+html,
+body {
+    background:
+        radial-gradient(
+            circle at 50% -10%,
+            rgba(79,140,255,.18),
+            transparent 42%
+        ),
+        radial-gradient(
+            circle at 100% 100%,
+            rgba(118,92,255,.12),
+            transparent 40%
+        ),
+        var(--ax-bg) !important;
+
+    color: var(--ax-text) !important;
+}
+
+
+/*
+ * AxelOS top bar
+ */
+
+#axelos-topbar {
+    position: fixed;
+
+    top: 0;
+    left: 0;
+    right: 0;
+
+    height: 58px;
+
+    z-index: 999999;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    padding:
+        0 20px;
+
+    pointer-events: none;
+
+    background:
+        linear-gradient(
+            180deg,
+            rgba(4,8,17,.97),
+            rgba(4,8,17,.72)
+        );
+
+    border-bottom:
+        1px solid
+        var(--ax-border);
+
+    backdrop-filter:
+        blur(20px);
+}
+
+
+/*
+ * Brand
+ */
+
+.axelos-brand {
+    display: flex;
+
+    align-items: center;
+
+    gap: 10px;
+}
+
+
+.axelos-logo {
+    width: 34px;
+    height: 34px;
+
+    display: flex;
+
+    align-items: center;
+    justify-content: center;
+
+    border-radius: 10px;
+
+    color: white;
+
+    font-size: 11px;
+
+    font-weight: 950;
+
+    letter-spacing: 1px;
+
+    background:
+        linear-gradient(
+            135deg,
+            var(--ax-blue),
+            var(--ax-purple)
+        );
+
+    box-shadow:
+        0 0 28px
+        rgba(79,140,255,.30);
+}
+
+
+.axelos-brand-name {
+    color: white;
+
+    font-size: 14px;
+
+    font-weight: 950;
+
+    letter-spacing: 4px;
+}
+
+
+.axelos-brand-subtitle {
+    margin-top: 2px;
+
+    color: var(--ax-cyan);
+
+    font-size: 7px;
+
+    font-weight: 800;
+
+    letter-spacing: 3px;
+}
+
+
+/*
+ * Session
+ */
+
+.axelos-session {
+    display: flex;
+
+    align-items: center;
+
+    gap: 8px;
+
+    color: var(--ax-muted);
+
+    font-size: 9px;
+
+    font-weight: 800;
+
+    letter-spacing: 1.3px;
+}
+
+
+.axelos-online-dot {
+    width: 7px;
+    height: 7px;
+
+    border-radius: 50%;
+
+    background:
+        var(--ax-green);
+
+    box-shadow:
+        0 0 13px
+        rgba(62,229,138,.85);
+}
+
+
+.axelos-session-divider {
+    width: 1px;
+    height: 15px;
+
+    margin:
+        0 5px;
+
+    background:
+        rgba(255,255,255,.12);
+}
+
+
+#axelos-inactivity {
+    color: white;
+
+    min-width: 44px;
+
+    font-variant-numeric:
+        tabular-nums;
+}
+
+
+/*
+ * Warning
+ */
+
+#axelos-warning {
+    position: fixed;
+
+    left: 50%;
+    bottom: 32px;
+
+    z-index: 1000000;
+
+    width: min(
+        390px,
+        calc(100vw - 30px)
+    );
+
+    padding: 14px 16px;
+
+    display: flex;
+
+    gap: 12px;
+
+    border-radius: 14px;
+
+    background:
+        rgba(9,14,26,.97);
+
+    border:
+        1px solid
+        rgba(255,180,84,.42);
+
+    box-shadow:
+        0 25px 80px
+        rgba(0,0,0,.55);
+
+    opacity: 0;
+
+    pointer-events: none;
+
+    transform:
+        translate(-50%, 20px);
+
+    transition:
+        opacity .25s ease,
+        transform .25s ease;
+}
+
+
+#axelos-warning.visible {
+    opacity: 1;
+
+    transform:
+        translate(-50%, 0);
+}
+
+
+.axelos-warning-icon {
+    width: 30px;
+    height: 30px;
+
+    flex: 0 0 auto;
+
+    display: flex;
+
+    align-items: center;
+    justify-content: center;
+
+    border-radius: 50%;
+
+    color: #241700;
+
+    background:
+        var(--ax-orange);
+
+    font-weight: 950;
+}
+
+
+.axelos-warning-title {
+    color: white;
+
+    font-size: 12px;
+
+    font-weight: 850;
+}
+
+
+.axelos-warning-text {
+    margin-top: 3px;
+
+    color: var(--ax-muted);
+
+    font-size: 10px;
+
+    line-height: 1.4;
+}
+
+
+/*
+ * Loading overlay
+ */
+
+#axelos-loading {
+    position: fixed;
+
+    inset: 0;
+
+    z-index: 999998;
+
+    display: flex;
+
+    align-items: center;
+    justify-content: center;
+
+    flex-direction: column;
+
+    background:
+        radial-gradient(
+            circle at center,
+            #101c35,
+            #050811 65%
+        );
+
+    transition:
+        opacity .5s ease,
+        visibility .5s ease;
+}
+
+
+#axelos-loading.hidden {
+    opacity: 0;
+
+    visibility: hidden;
+
+    pointer-events: none;
+}
+
+
+.axelos-loader {
+    width: 55px;
+    height: 55px;
+
+    margin-bottom: 25px;
+
+    border-radius: 50%;
+
+    border:
+        2px solid
+        rgba(79,140,255,.15);
+
+    border-top-color:
+        var(--ax-blue);
+
+    border-right-color:
+        var(--ax-cyan);
+
+    animation:
+        axelos-spin
+        1s linear infinite;
+
+    box-shadow:
+        0 0 35px
+        rgba(79,140,255,.25);
+}
+
+
+@keyframes axelos-spin {
+
+    to {
+        transform:
+            rotate(360deg);
+    }
+
+}
+
+
+.axelos-loading-title {
+    color: white;
+
+    font-size: 25px;
+
+    font-weight: 950;
+
+    letter-spacing: 8px;
+}
+
+
+.axelos-loading-subtitle {
+    margin-top: 4px;
+
+    color: var(--ax-cyan);
+
+    font-size: 8px;
+
+    font-weight: 800;
+
+    letter-spacing: 4px;
+}
+
+
+#axelos-loading-status {
+    margin-top: 25px;
+
+    color: var(--ax-muted);
+
+    font-size: 11px;
+}
+
+
+/*
+ * noVNC adjustment
+ */
+
+#noVNC_status_bar {
+    margin-top: 58px !important;
+}
+
+
+/*
+ * Panels
+ */
+
+.noVNC_panel {
+    background:
+        rgba(7,12,23,.97) !important;
+
+    border:
+        1px solid
+        var(--ax-border) !important;
+
+    border-radius:
+        13px !important;
+
+    box-shadow:
+        0 25px 80px
+        rgba(0,0,0,.55) !important;
+}
+
+
+/*
+ * Mobile
+ */
+
+@media(max-width:600px) {
+
+    #axelos-topbar {
+        padding:
+            0 12px;
+    }
+
+    .axelos-brand-subtitle {
+        display: none;
+    }
+
+    .axelos-session {
+        font-size: 8px;
+    }
+
+}
